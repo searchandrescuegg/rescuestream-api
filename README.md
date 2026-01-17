@@ -1,4 +1,4 @@
-# go-start
+# rescuestream-api
 
 A template repository for Go projects with built-in observability support.
 
@@ -44,15 +44,15 @@ This starts the application along with the Grafana LGTM (Loki, Grafana, Tempo, M
 ### Build and Run
 
 ```bash
-go build -o go-start ./cmd/go-start
-./go-start
+go build -o rescuestream-api ./cmd/rescuestream-api
+./rescuestream-api
 ```
 
 ## Project Structure
 
 ```
 .
-├── cmd/go-start/       # Application entrypoint
+├── cmd/rescuestream-api/       # Application entrypoint
 ├── internal/
 │   ├── config/         # Environment-based configuration
 │   └── logging/        # Logging utilities

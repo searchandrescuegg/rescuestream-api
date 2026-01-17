@@ -17,13 +17,25 @@ services:
       # tracing
       TRACING_ENABLED: "false"
       TRACING_SAMPLERATE: "1.0"
-      TRACING_SERVICE: "go-start"
+      TRACING_SERVICE: "rescuestream-api"
       TRACING_VERSION: "0.0.1"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://lgtm:4317"
 
       # grpc (otlp tracing)
       GRPC_GO_LOG_VERBOSITY_LEVEL: 99
       GRPC_GO_LOG_SEVERITY_LEVEL: info
+
+  mediamtx:
+    image: bluenviron/mediamtx:1-ffmpeg
+    ports:
+      - "8554:8554" # RTSP
+      - "1935:1935" # RTMP ingestion
+      - "8888:8888" # HLS
+      - "8889:8889" # WebRTC HTTP
+      - "8189:8189/udp" # WebRTC ICE/UDP
+      - "9997:9997" # API
+    volumes:
+      - ./docker/mediamtx/mediamtx.yml:/mediamtx.yml
 
   lgtm:
     image: grafana/otel-lgtm

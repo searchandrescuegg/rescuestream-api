@@ -1,4 +1,4 @@
-module github.com/michaelpeterswa/go-start
+module github.com/searchandrescuegg/rescuestream-api
 
 go 1.22.0
 

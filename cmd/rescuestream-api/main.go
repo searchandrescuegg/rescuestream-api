@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"alpineworks.io/ootel"
-	"github.com/michaelpeterswa/go-start/internal/config"
-	"github.com/michaelpeterswa/go-start/internal/logging"
+	"github.com/searchandrescuegg/rescuestream-api/internal/config"
+	"github.com/searchandrescuegg/rescuestream-api/internal/logging"
 	"go.opentelemetry.io/contrib/instrumentation/host"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 )

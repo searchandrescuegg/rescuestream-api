@@ -1,0 +1,79 @@
+###############################################
+# MediaMTX Configuration
+###############################################
+
+# General settings
+logLevel: info
+logDestinations: [stdout]
+
+###############################################
+# Control API
+###############################################
+api: yes
+apiAddress: :9997
+
+# Use internal authentication
+authMethod: internal
+
+authInternalUsers:
+  # Allow anonymous access with full permissions
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+        path:
+      - action: read
+        path:
+      - action: playback
+        path:
+      - action: api
+        path:
+      - action: metrics
+        path:
+      - action: pprof
+        path:
+
+###############################################
+# RTMP Server (Ingestion)
+###############################################
+rtmp: yes
+rtmpAddress: :1935
+rtmpEncryption: "no"
+
+###############################################
+# WebRTC Server (Output)
+###############################################
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcAdditionalHosts: [10.0.1.178]
+
+###############################################
+# Disabled Protocols
+###############################################
+hls: no
+srt: no
+
+###############################################
+# RTSP Server (enabled by default, keep for flexibility)
+###############################################
+rtsp: yes
+rtspAddress: :8554
+
+###############################################
+# Path Defaults
+###############################################
+pathDefaults:
+  # Source settings
+  source: publisher
+
+  # Recording (disabled by default)
+  record: no
+
+###############################################
+# Paths
+# Define specific path configurations here
+###############################################
+paths:
+  all_others:
