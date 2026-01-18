@@ -23,18 +23,15 @@ services:
       - "8081:8081"
     environment:
       # Database
-      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/rescuestream?sslmode=disable"
+      DATABASE_URL: >-
+        postgres://postgres:postgres@postgres:5432/rescuestream?sslmode=disable
 
-      # API Authentication
-      # The API uses HMAC-SHA256 signature authentication.
-      # Clients must send: X-API-Key, X-Timestamp, and X-Signature headers.
-      # The signature is: HMAC-SHA256("{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}", API_SECRET)
-      #
-      # Generate a secure secret for production:
-      #   openssl rand -hex 32
-      #   # or: head -c 32 /dev/urandom | base64
+      # API Authentication - uses HMAC-SHA256 signature authentication.
+      # Clients must send X-API-Key, X-Timestamp, and X-Signature headers.
+      # Signature: HMAC-SHA256("{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}", secret)
+      # Generate a secure secret: openssl rand -hex 32
       API_PORT: "8080"
-      API_SECRET: "dev-secret-change-in-production"  # CHANGE THIS IN PRODUCTION!
+      API_SECRET: "dev-secret-change-in-production"  # CHANGE IN PROD!
 
       # MediaMTX
       MEDIAMTX_API_URL: "http://mediamtx:9997"

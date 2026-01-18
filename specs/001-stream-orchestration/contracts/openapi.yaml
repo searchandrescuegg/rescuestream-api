@@ -414,7 +414,7 @@ paths:
     get:
       tags: [StreamKeys]
       summary: List stream keys
-      description: Returns all stream keys (key_value field omitted for security)
+      description: Returns all stream keys (key_value omitted for security)
       operationId: listStreamKeys
       security:
         - ApiKeyAuth: []

@@ -15,6 +15,24 @@ linters:
     - unconvert
     - gocyclo
     - bodyclose
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    misspell:
+      locale: US
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: tests/
+        linters:
+          - errcheck
 
 formatters:
   enable:
@@ -24,23 +42,3 @@ formatters:
     goimports:
       local-prefixes:
         - github.com/searchandrescuegg/rescuestream-api
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  misspell:
-    locale: US
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-    - path: tests/
-      linters:
-        - errcheck
