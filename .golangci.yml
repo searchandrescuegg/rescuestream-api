@@ -33,6 +33,10 @@ linters:
       - path: tests/
         linters:
           - errcheck
+      - path: internal/database/migrate\.go
+        text: "Error return value of `m.Close` is not checked"
+        linters:
+          - errcheck
 
 formatters:
   enable:

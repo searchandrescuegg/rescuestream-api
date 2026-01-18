@@ -138,7 +138,7 @@ func (h *BroadcasterHandler) updateBroadcaster(w http.ResponseWriter, r *http.Re
 	}
 
 	var req UpdateBroadcasterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if decodeErr := json.NewDecoder(r.Body).Decode(&req); decodeErr != nil {
 		WriteError(w, r, ErrInvalidRequest("invalid request body"))
 		return
 	}

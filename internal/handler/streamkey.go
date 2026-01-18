@@ -104,8 +104,8 @@ func (h *StreamKeyHandler) createStreamKey(w http.ResponseWriter, r *http.Reques
 	}
 
 	if req.ExpiresAt != nil {
-		expiresAt, err := time.Parse(time.RFC3339, *req.ExpiresAt)
-		if err != nil {
+		expiresAt, parseErr := time.Parse(time.RFC3339, *req.ExpiresAt)
+		if parseErr != nil {
 			WriteError(w, r, ErrInvalidRequest("invalid expires_at format, use RFC3339"))
 			return
 		}

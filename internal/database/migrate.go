@@ -24,7 +24,9 @@ func RunMigrations(databaseURL string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create migrate instance: %w", err)
 	}
-	defer func() { _, _ = m.Close() }()
+	defer func() {
+		_, _ = m.Close()
+	}()
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -44,7 +46,9 @@ func RollbackMigrations(databaseURL string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create migrate instance: %w", err)
 	}
-	defer func() { _, _ = m.Close() }()
+	defer func() {
+		_, _ = m.Close()
+	}()
 
 	if err := m.Steps(-1); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("failed to rollback migration: %w", err)
@@ -64,7 +68,9 @@ func MigrationVersion(databaseURL string) (uint, bool, error) {
 	if err != nil {
 		return 0, false, fmt.Errorf("failed to create migrate instance: %w", err)
 	}
-	defer func() { _, _ = m.Close() }()
+	defer func() {
+		_, _ = m.Close()
+	}()
 
 	version, dirty, err := m.Version()
 	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {

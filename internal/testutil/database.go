@@ -46,8 +46,8 @@ func SetupTestDatabase(t *testing.T) *TestDatabase {
 	}
 
 	// Run migrations
-	if err := database.RunMigrations(connStr); err != nil {
-		t.Fatalf("failed to run migrations: %v", err)
+	if migrationErr := database.RunMigrations(connStr); migrationErr != nil {
+		t.Fatalf("failed to run migrations: %v", migrationErr)
 	}
 
 	// Create connection pool

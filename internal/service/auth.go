@@ -95,7 +95,6 @@ func (s *AuthService) Authenticate(ctx context.Context, req AuthRequest) (*AuthR
 	}
 
 	var result *AuthResult
-	var authErr error
 
 	// Use a transaction to ensure atomic check-and-update
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -165,10 +164,6 @@ func (s *AuthService) Authenticate(ctx context.Context, req AuthRequest) (*AuthR
 
 	if err != nil {
 		return nil, fmt.Errorf("authentication transaction failed: %w", err)
-	}
-
-	if authErr != nil {
-		return nil, authErr
 	}
 
 	return result, nil

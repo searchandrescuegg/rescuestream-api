@@ -75,7 +75,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() {
-		_ = shutdown(ctx)
+		if shutdownErr := shutdown(ctx); shutdownErr != nil {
+			slog.Error("failed to shutdown telemetry", slog.String("error", shutdownErr.Error()))
+		}
 	}()
 
 	err = runtime.Start(runtime.WithMinimumReadMemStatsInterval(5 * time.Second))
@@ -92,8 +94,8 @@ func main() {
 
 	// Run database migrations
 	slog.Info("running database migrations")
-	if err := database.RunMigrations(c.DatabaseURL); err != nil {
-		slog.Error("failed to run migrations", slog.String("error", err.Error()))
+	if migrationErr := database.RunMigrations(c.DatabaseURL); migrationErr != nil {
+		slog.Error("failed to run migrations", slog.String("error", migrationErr.Error()))
 		os.Exit(1)
 	}
 	slog.Info("database migrations completed")

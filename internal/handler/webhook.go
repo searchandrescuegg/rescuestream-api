@@ -66,7 +66,11 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path, _ := route.GetPathTemplate()
+	path, err := route.GetPathTemplate()
+	if err != nil {
+		WriteError(w, r, ErrInternalServer("failed to get route template"))
+		return
+	}
 	if strings.HasSuffix(path, "/ready") {
 		h.handleReady(w, r)
 	} else if strings.HasSuffix(path, "/not-ready") {
