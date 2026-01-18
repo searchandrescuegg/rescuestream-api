@@ -1,0 +1,46 @@
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.22"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - gocyclo
+    - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/searchandrescuegg/rescuestream-api
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+    - path: tests/
+      linters:
+        - errcheck
