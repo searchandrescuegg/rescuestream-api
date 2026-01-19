@@ -1,0 +1,713 @@
+openapi: 3.1.0
+info:
+  title: RescueStream API
+  description: Stream orchestration API for MediaMTX integration
+  version: 1.0.0
+  contact:
+    name: RescueStream Team
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Auth
+    description: MediaMTX authentication endpoints (no API key required)
+  - name: Webhooks
+    description: MediaMTX lifecycle webhooks (no API key required)
+  - name: Streams
+    description: Stream listing and details (API key required)
+  - name: StreamKeys
+    description: Stream key management (API key required)
+  - name: Broadcasters
+    description: Broadcaster management (API key required)
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Shared secret for frontend authentication
+
+  schemas:
+    # Request schemas
+    AuthRequest:
+      type: object
+      description: MediaMTX external authentication request
+      properties:
+        user:
+          type: string
+          description: Username (typically empty for RTMP)
+        password:
+          type: string
+          description: Stream key value
+        ip:
+          type: string
+          description: Client IP address
+        action:
+          type: string
+          enum: [publish, read, playback, api, metrics, pprof]
+        path:
+          type: string
+          description: Stream path name
+        protocol:
+          type: string
+          enum: [rtsp, rtmp, hls, webrtc, srt]
+        id:
+          type: string
+          description: Connection ID
+        query:
+          type: string
+          description: Query string
+      required:
+        - action
+        - path
+        - protocol
+
+    WebhookReadyRequest:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Stream path
+        source_type:
+          type: string
+          description: MediaMTX source type
+        source_id:
+          type: string
+          description: MediaMTX source connection ID
+      required:
+        - path
+
+    WebhookNotReadyRequest:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Stream path
+      required:
+        - path
+
+    CreateStreamKeyRequest:
+      type: object
+      properties:
+        broadcaster_id:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
+          description: Optional expiration time
+      required:
+        - broadcaster_id
+
+    CreateBroadcasterRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          maxLength: 255
+        metadata:
+          type: object
+          additionalProperties: true
+      required:
+        - display_name
+
+    UpdateBroadcasterRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          maxLength: 255
+        metadata:
+          type: object
+          additionalProperties: true
+
+    # Response schemas
+    StreamURLs:
+      type: object
+      properties:
+        hls:
+          type: string
+          format: uri
+        webrtc:
+          type: string
+          format: uri
+
+    Stream:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        stream_key_id:
+          type: string
+          format: uuid
+        path:
+          type: string
+        status:
+          type: string
+          enum: [active, ended]
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        source_type:
+          type: string
+        source_id:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        recording_ref:
+          type: string
+        urls:
+          $ref: '#/components/schemas/StreamURLs'
+
+    StreamKey:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        key_value:
+          type: string
+          description: Only included on creation
+        broadcaster_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, revoked, expired]
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+
+    Broadcaster:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # List responses
+    StreamList:
+      type: object
+      properties:
+        streams:
+          type: array
+          items:
+            $ref: '#/components/schemas/Stream'
+        count:
+          type: integer
+
+    StreamKeyList:
+      type: object
+      properties:
+        stream_keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/StreamKey'
+        count:
+          type: integer
+
+    BroadcasterList:
+      type: object
+      properties:
+        broadcasters:
+          type: array
+          items:
+            $ref: '#/components/schemas/Broadcaster'
+        count:
+          type: integer
+
+    # Error response (RFC 9457)
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI reference identifying the problem type
+        title:
+          type: string
+          description: Short human-readable summary
+        status:
+          type: integer
+          description: HTTP status code
+        detail:
+          type: string
+          description: Human-readable explanation
+        instance:
+          type: string
+          format: uri
+          description: URI reference for this occurrence
+        errors:
+          type: array
+          description: Field-level validation errors
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+      required:
+        - type
+        - title
+        - status
+
+paths:
+  /auth:
+    post:
+      tags: [Auth]
+      summary: Authenticate stream key
+      description: |
+        Called by MediaMTX to validate stream keys. Returns 200 for success,
+        401 for failure. No API key required (called by MediaMTX).
+      operationId: authenticateStreamKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRequest'
+      responses:
+        '200':
+          description: Authentication successful
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /webhook/ready:
+    post:
+      tags: [Webhooks]
+      summary: Stream ready webhook
+      description: |
+        Called by MediaMTX when a stream becomes ready for viewing.
+        No API key required (called by MediaMTX).
+      operationId: webhookStreamReady
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookReadyRequest'
+      responses:
+        '204':
+          description: Webhook processed
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /webhook/not-ready:
+    post:
+      tags: [Webhooks]
+      summary: Stream not ready webhook
+      description: |
+        Called by MediaMTX when a stream is no longer available.
+        No API key required (called by MediaMTX).
+      operationId: webhookStreamNotReady
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookNotReadyRequest'
+      responses:
+        '204':
+          description: Webhook processed
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /streams:
+    get:
+      tags: [Streams]
+      summary: List active streams
+      description: Returns all currently active streams with video URLs
+      operationId: listStreams
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of active streams
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamList'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /streams/{id}:
+    get:
+      tags: [Streams]
+      summary: Get stream details
+      description: Returns detailed information about a specific stream
+      operationId: getStream
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Stream details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stream'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Stream not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /stream-keys:
+    get:
+      tags: [StreamKeys]
+      summary: List stream keys
+      description: Returns all stream keys (key_value omitted for security)
+      operationId: listStreamKeys
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of stream keys
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamKeyList'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+    post:
+      tags: [StreamKeys]
+      summary: Create stream key
+      description: |
+        Creates a new stream key for a broadcaster.
+        The key_value is only returned in this response.
+      operationId: createStreamKey
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStreamKeyRequest'
+      responses:
+        '201':
+          description: Stream key created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamKey'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /stream-keys/{id}:
+    get:
+      tags: [StreamKeys]
+      summary: Get stream key details
+      description: Returns stream key details (key_value omitted for security)
+      operationId: getStreamKey
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Stream key details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamKey'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Stream key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+    delete:
+      tags: [StreamKeys]
+      summary: Revoke stream key
+      description: |
+        Revokes a stream key, immediately invalidating it.
+        Any active stream using this key will be terminated.
+      operationId: revokeStreamKey
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Stream key revoked
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Stream key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /broadcasters:
+    get:
+      tags: [Broadcasters]
+      summary: List broadcasters
+      operationId: listBroadcasters
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: List of broadcasters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BroadcasterList'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+    post:
+      tags: [Broadcasters]
+      summary: Create broadcaster
+      operationId: createBroadcaster
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBroadcasterRequest'
+      responses:
+        '201':
+          description: Broadcaster created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Broadcaster'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /broadcasters/{id}:
+    get:
+      tags: [Broadcasters]
+      summary: Get broadcaster details
+      operationId: getBroadcaster
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Broadcaster details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Broadcaster'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Broadcaster not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+    patch:
+      tags: [Broadcasters]
+      summary: Update broadcaster
+      operationId: updateBroadcaster
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBroadcasterRequest'
+      responses:
+        '200':
+          description: Broadcaster updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Broadcaster'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Broadcaster not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+    delete:
+      tags: [Broadcasters]
+      summary: Delete broadcaster
+      description: Deletes a broadcaster and all associated stream keys
+      operationId: deleteBroadcaster
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Broadcaster deleted
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Broadcaster not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]

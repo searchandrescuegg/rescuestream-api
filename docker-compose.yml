@@ -1,29 +1,78 @@
 ---
 services:
-  main:
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rescuestream
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
     build: .
     ports:
+      - "8080:8080"
       - "8081:8081"
     environment:
-      # logging
-      LOG_LEVEL: "info"
+      # Database
+      DATABASE_URL: >-
+        postgres://postgres:postgres@postgres:5432/rescuestream?sslmode=disable
 
-      # metrics
+      # API Authentication - uses HMAC-SHA256 signature authentication.
+      # Clients must send X-API-Key, X-Timestamp, and X-Signature headers.
+      # Signature: HMAC-SHA256("{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}", secret)
+      # Generate a secure secret: openssl rand -hex 32
+      API_PORT: "8080"
+      API_SECRET: "dev-secret-change-in-production"  # CHANGE IN PROD!
+
+      # MediaMTX
+      MEDIAMTX_API_URL: "http://mediamtx:9997"
+      MEDIAMTX_PUBLIC_URL: "http://localhost:8889"
+
+      # Logging
+      LOG_LEVEL: "debug"
+
+      # Metrics
       METRICS_ENABLED: "true"
       METRICS_PORT: "8081"
 
       LOCAL: "true"
 
-      # tracing
+      # Tracing
       TRACING_ENABLED: "false"
       TRACING_SAMPLERATE: "1.0"
-      TRACING_SERVICE: "go-start"
+      TRACING_SERVICE: "rescuestream-api"
       TRACING_VERSION: "0.0.1"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://lgtm:4317"
 
-      # grpc (otlp tracing)
+      # gRPC (OTLP tracing)
       GRPC_GO_LOG_VERBOSITY_LEVEL: 99
       GRPC_GO_LOG_SEVERITY_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+
+  mediamtx:
+    build: ./docker/mediamtx
+    ports:
+      - "8554:8554" # RTSP
+      - "1935:1935" # RTMP ingestion
+      - "8888:8888" # HLS
+      - "8889:8889" # WebRTC HTTP
+      - "8189:8189/udp" # WebRTC ICE/UDP
+      - "9997:9997" # API
+    volumes:
+      - ./docker/mediamtx/mediamtx.yml:/mediamtx.yml
 
   lgtm:
     image: grafana/otel-lgtm
@@ -38,3 +87,6 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_DISABLE_LOGIN_FORM=true
+
+volumes:
+  postgres_data:

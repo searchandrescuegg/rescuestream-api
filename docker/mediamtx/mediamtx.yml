@@ -1,0 +1,83 @@
+###############################################
+# MediaMTX Configuration for RescueStream
+###############################################
+
+# General settings
+logLevel: info
+logDestinations: [stdout]
+
+###############################################
+# Control API
+###############################################
+api: yes
+apiAddress: :9997
+
+###############################################
+# Authentication
+# Use HTTP auth to validate stream keys via RescueStream API
+###############################################
+authMethod: http
+authHTTPAddress: http://api:8080/auth
+
+# Exclude read/playback actions from auth (viewers don't need auth)
+authHTTPExclude:
+  - action: read
+  - action: playback
+  - action: api
+  - action: metrics
+  - action: pprof
+
+###############################################
+# RTMP Server (Ingestion)
+###############################################
+rtmp: yes
+rtmpAddress: :1935
+rtmpEncryption: "no"
+
+###############################################
+# WebRTC Server (Output)
+###############################################
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+
+###############################################
+# Disabled Protocols
+###############################################
+hls: no
+srt: no
+
+###############################################
+# RTSP Server (enabled for flexibility)
+###############################################
+rtsp: yes
+rtspAddress: :8554
+
+###############################################
+# Path Defaults
+###############################################
+pathDefaults:
+  # Source settings
+  source: publisher
+
+  # Recording (disabled by default)
+  record: no
+
+  # Lifecycle webhooks
+  # Called when a stream becomes ready (publisher connected)
+  runOnReady: >-
+    curl -sf -X POST http://api:8080/webhook/ready
+    -H 'Content-Type: application/json'
+    -d '{"path":"$MTX_PATH","source_type":"$MTX_SOURCE_TYPE","source_id":"$MTX_SOURCE_ID"}'
+
+  # Called when a stream is no longer ready (publisher disconnected)
+  runOnNotReady: >-
+    curl -sf -X POST http://api:8080/webhook/not-ready
+    -H 'Content-Type: application/json'
+    -d '{"path":"$MTX_PATH"}'
+
+###############################################
+# Paths
+###############################################
+paths:
+  all_others:
