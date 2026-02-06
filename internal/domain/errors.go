@@ -27,4 +27,10 @@ var (
 
 	// ErrUnauthorized indicates the request is not authorized.
 	ErrUnauthorized = errors.New("unauthorized")
+
+	// ErrAdminRequired indicates admin privileges are required.
+	ErrAdminRequired = errors.New("admin privileges required")
+
+	// ErrForbidden indicates the action is forbidden for the current user.
+	ErrForbidden = errors.New("forbidden")
 )

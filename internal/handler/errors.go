@@ -37,6 +37,7 @@ const (
 	ErrorTypeNotFound         = "/errors/not-found"
 	ErrorTypeInvalidRequest   = "/errors/invalid-request"
 	ErrorTypeUnauthorized     = "/errors/unauthorized"
+	ErrorTypeForbidden        = "/errors/forbidden"
 	ErrorTypeConflict         = "/errors/conflict"
 	ErrorTypeInternalError    = "/errors/internal-error"
 	ErrorTypeInvalidStreamKey = "/errors/invalid-stream-key"
@@ -71,6 +72,16 @@ func ErrUnauthorized(detail string) *HTTPError {
 		Status: http.StatusUnauthorized,
 		Type:   ErrorTypeUnauthorized,
 		Title:  "Unauthorized",
+		Detail: detail,
+	}
+}
+
+// ErrForbidden creates a forbidden error.
+func ErrForbidden(detail string) *HTTPError {
+	return &HTTPError{
+		Status: http.StatusForbidden,
+		Type:   ErrorTypeForbidden,
+		Title:  "Forbidden",
 		Detail: detail,
 	}
 }
@@ -145,6 +156,10 @@ func MapDomainError(err error) *HTTPError {
 		}
 	case errors.Is(err, domain.ErrUnauthorized):
 		return ErrUnauthorized("Unauthorized")
+	case errors.Is(err, domain.ErrAdminRequired):
+		return ErrForbidden("Admin privileges required")
+	case errors.Is(err, domain.ErrForbidden):
+		return ErrForbidden("Access denied")
 	default:
 		return ErrInternalServer("An unexpected error occurred")
 	}
