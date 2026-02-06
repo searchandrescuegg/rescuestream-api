@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -381,17 +380,4 @@ func TestAuditMiddleware_CapturesRequestID(t *testing.T) {
 
 	assert.NotNil(t, entries[0].RequestID)
 	assert.Equal(t, "unique-request-id-456", *entries[0].RequestID)
-}
-
-func createTestAPIKey(t *testing.T, pool *pgxpool.Pool, keyIdentifier string, isAdmin bool) uuid.UUID {
-	t.Helper()
-
-	id := uuid.New()
-	_, err := pool.Exec(context.Background(),
-		`INSERT INTO api_keys (id, key_identifier, is_admin, created_at)
-		 VALUES ($1, $2, $3, NOW())`,
-		id, keyIdentifier, isAdmin)
-	require.NoError(t, err)
-
-	return id
 }
