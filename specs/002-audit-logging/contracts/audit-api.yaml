@@ -1,0 +1,362 @@
+openapi: 3.1.0
+info:
+  title: RescueStream Audit Logging API
+  version: 1.0.0
+  description: |
+    Audit logging endpoints for tracking and retrieving system activity.
+
+    ## Authentication
+    All endpoints require HMAC-SHA256 authentication with headers:
+    - `X-API-Key`: Your API key identifier
+    - `X-Timestamp`: Unix timestamp (seconds since epoch)
+    - `X-Signature`: HMAC-SHA256 signature of `{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}`
+
+    ## Authorization
+    - `GET /audit-logs`: Requires API key with `is_admin = true`
+    - `POST /audit-events`: Any authenticated API key
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+paths:
+  /audit-logs:
+    get:
+      summary: List audit log entries
+      description: |
+        Retrieves audit log entries with optional filtering and pagination.
+        **Requires admin API key.**
+      operationId: listAuditLogs
+      tags:
+        - Audit Logs
+      security:
+        - hmacAuth: []
+      parameters:
+        - name: from
+          in: query
+          description: Start timestamp (inclusive), RFC 3339 format
+          schema:
+            type: string
+            format: date-time
+          example: "2026-02-01T00:00:00Z"
+        - name: to
+          in: query
+          description: End timestamp (exclusive), RFC 3339 format
+          schema:
+            type: string
+            format: date-time
+          example: "2026-02-05T23:59:59Z"
+        - name: actor
+          in: query
+          description: Filter by API key identifier
+          schema:
+            type: string
+          example: "frontend-app"
+        - name: action
+          in: query
+          description: Filter by action type
+          schema:
+            type: string
+            enum: [create, update, delete, revoke, login, logout, started_stream]
+          example: "create"
+        - name: resource_type
+          in: query
+          description: Filter by resource type
+          schema:
+            type: string
+            enum: [broadcaster, stream, stream_key]
+          example: "broadcaster"
+        - name: resource_id
+          in: query
+          description: Filter by specific resource ID
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        - name: limit
+          in: query
+          description: Maximum number of entries to return (1-100, default 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          description: Number of entries to skip for pagination
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Audit log entries retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogListResponse'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: "/errors/invalid-request"
+                title: "Invalid Request"
+                status: 400
+                detail: "Invalid date format for 'from' parameter. Expected RFC 3339 format."
+                instance: "/audit-logs"
+        '401':
+          description: Missing or invalid authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: API key does not have admin privileges
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: "/errors/forbidden"
+                title: "Forbidden"
+                status: 403
+                detail: "Admin privileges required to access audit logs"
+                instance: "/audit-logs"
+
+  /audit-events:
+    post:
+      summary: Submit a custom audit event
+      description: |
+        Records a custom audit event (e.g., login, logout, started_stream).
+        **Any authenticated API key can submit events.**
+      operationId: createAuditEvent
+      tags:
+        - Audit Events
+      security:
+        - hmacAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAuditEventRequest'
+            examples:
+              login:
+                summary: User login event
+                value:
+                  event_type: "login"
+                  metadata:
+                    session_id: "sess_abc123"
+                    browser: "Chrome"
+              logout:
+                summary: User logout event
+                value:
+                  event_type: "logout"
+              started_stream:
+                summary: Stream started event
+                value:
+                  event_type: "started_stream"
+                  metadata:
+                    stream_id: "550e8400-e29b-41d4-a716-446655440000"
+                    broadcaster_name: "Rescue Team Alpha"
+      responses:
+        '201':
+          description: Audit event created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogEntry'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+              example:
+                type: "/errors/invalid-request"
+                title: "Invalid Request"
+                status: 400
+                detail: "event_type is required"
+                instance: "/audit-events"
+        '401':
+          description: Missing or invalid authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+components:
+  securitySchemes:
+    hmacAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        HMAC-SHA256 authentication. Requires three headers:
+        - X-API-Key: Your API key identifier
+        - X-Timestamp: Unix timestamp
+        - X-Signature: HMAC-SHA256 signature
+
+  schemas:
+    AuditLogEntry:
+      type: object
+      required:
+        - id
+        - timestamp
+        - actor
+        - action
+        - request_method
+        - request_path
+        - ip_address
+        - outcome
+        - metadata
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the audit log entry
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the action occurred (RFC 3339)
+          example: "2026-02-05T14:30:00Z"
+        actor:
+          type: string
+          description: API key identifier that performed the action
+          example: "frontend-app"
+        action:
+          type: string
+          description: Type of action performed
+          example: "create"
+        resource_type:
+          type: string
+          nullable: true
+          description: Type of resource affected (null for custom events)
+          example: "broadcaster"
+        resource_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID of the affected resource (null for custom events)
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        request_method:
+          type: string
+          description: HTTP method of the request
+          example: "POST"
+        request_path:
+          type: string
+          description: URL path of the request
+          example: "/broadcasters"
+        ip_address:
+          type: string
+          description: Client IP address
+          example: "192.168.1.100"
+        outcome:
+          type: string
+          enum: [success, failure]
+          description: Whether the action succeeded or failed
+          example: "success"
+        failure_reason:
+          type: string
+          nullable: true
+          description: Error message if outcome is failure
+          example: null
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Additional context (before/after state, custom data)
+          example: {}
+        request_id:
+          type: string
+          nullable: true
+          description: Correlation ID from X-Request-ID header
+          example: "req-abc123"
+
+    AuditLogListResponse:
+      type: object
+      required:
+        - audit_logs
+        - pagination
+      properties:
+        audit_logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLogEntry'
+        pagination:
+          type: object
+          required:
+            - limit
+            - offset
+            - total
+          properties:
+            limit:
+              type: integer
+              description: Number of entries per page
+              example: 50
+            offset:
+              type: integer
+              description: Number of entries skipped
+              example: 0
+            total:
+              type: integer
+              description: Total number of matching entries
+              example: 1234
+
+    CreateAuditEventRequest:
+      type: object
+      required:
+        - event_type
+      properties:
+        event_type:
+          type: string
+          maxLength: 50
+          description: Type of custom event (e.g., login, logout, started_stream)
+          example: "login"
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Optional additional data for the event
+          example:
+            session_id: "sess_abc123"
+
+    ProblemDetails:
+      type: object
+      description: RFC 9457 Problem Details for HTTP APIs
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+      properties:
+        type:
+          type: string
+          format: uri
+          description: URI reference identifying the problem type
+          example: "/errors/not-found"
+        title:
+          type: string
+          description: Short human-readable summary
+          example: "Not Found"
+        status:
+          type: integer
+          description: HTTP status code
+          example: 404
+        detail:
+          type: string
+          description: Human-readable explanation
+          example: "The requested resource was not found"
+        instance:
+          type: string
+          description: URI reference to the specific occurrence
+          example: "/broadcasters/550e8400-e29b-41d4-a716-446655440000"
+
+tags:
+  - name: Audit Logs
+    description: Admin-only audit log retrieval
+  - name: Audit Events
+    description: Custom audit event submission
