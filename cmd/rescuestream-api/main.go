@@ -114,6 +114,8 @@ func main() {
 	broadcasterRepo := database.NewBroadcasterRepo(pool)
 	streamKeyRepo := database.NewStreamKeyRepo(pool)
 	streamRepo := database.NewStreamRepo(pool)
+	auditLogRepo := database.NewAuditLogRepo(pool)
+	apiKeyRepo := database.NewAPIKeyRepo(pool)
 
 	// Create MediaMTX client
 	mediaMTXClient, err := service.NewMediaMTXClient(
@@ -131,6 +133,8 @@ func main() {
 	streamService := service.NewStreamService(streamRepo, mediaMTXClient, service.WithStreamLogger(logger))
 	streamKeyService := service.NewStreamKeyService(streamKeyRepo, streamRepo, mediaMTXClient, service.WithStreamKeyLogger(logger))
 	broadcasterService := service.NewBroadcasterService(broadcasterRepo, service.WithBroadcasterLogger(logger))
+	auditLogService := service.NewAuditLogService(auditLogRepo, service.WithAuditLogLogger(logger))
+	apiKeyService := service.NewAPIKeyService(apiKeyRepo, service.WithAPIKeyLogger(logger))
 
 	// Create handlers
 	authHandler := handler.NewAuthHandler(authService, logger)
@@ -139,6 +143,7 @@ func main() {
 	streamKeyHandler := handler.NewStreamKeyHandler(streamKeyService, logger)
 	broadcasterHandler := handler.NewBroadcasterHandler(broadcasterService, logger)
 	healthHandler := handler.NewHealthHandler(pool)
+	auditLogHandler := handler.NewAuditLogHandler(auditLogService, apiKeyService, logger)
 
 	// Create key store for HMAC auth
 	keyStore := handler.NewEnvKeyStore(c.APISecret)
@@ -154,6 +159,8 @@ func main() {
 		server.WithStreamKeyHandler(streamKeyHandler),
 		server.WithBroadcasterHandler(broadcasterHandler),
 		server.WithHealthHandler(healthHandler),
+		server.WithAuditLogHandler(auditLogHandler),
+		server.WithAuditService(auditLogService),
 	)
 
 	// Handle graceful shutdown
