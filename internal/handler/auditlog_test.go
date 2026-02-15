@@ -21,16 +21,6 @@ import (
 	"github.com/searchandrescuegg/rescuestream-api/internal/testutil"
 )
 
-// mockAdminChecker implements handler.AdminChecker for testing
-type mockAdminChecker struct {
-	isAdmin bool
-	err     error
-}
-
-func (m *mockAdminChecker) IsAdmin(ctx context.Context, apiKey string) (bool, error) {
-	return m.isAdmin, m.err
-}
-
 // ============================================================
 // Tests for User Story 1 (T021, T022, T023)
 // ============================================================
@@ -45,7 +35,7 @@ func TestAuditLogHandler_ListAuditLogs(t *testing.T) {
 	createTestAuditLog(t, db.Pool, "test-api-key", "delete", "stream_key")
 
 	// Setup handler with admin permissions
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Execute
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs", nil)
@@ -71,7 +61,7 @@ func TestAuditLogHandler_ListAuditLogs_EmptyResult(t *testing.T) {
 	defer db.Cleanup(t)
 
 	// Setup handler with admin permissions (no audit entries created)
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Execute
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs", nil)
@@ -90,30 +80,6 @@ func TestAuditLogHandler_ListAuditLogs_EmptyResult(t *testing.T) {
 	assert.Equal(t, int64(0), resp.Pagination.Total)
 }
 
-func TestAuditLogHandler_ListAuditLogs_AdminOnlyAccess(t *testing.T) {
-	db := testutil.SetupTestDatabase(t)
-	defer db.Cleanup(t)
-
-	// Setup handler with non-admin permissions
-	h := setupAuditLogHandler(t, db.Pool, false)
-
-	// Execute
-	req := httptest.NewRequest(http.MethodGet, "/audit-logs", nil)
-	req = addAPIKeyToContext(req, "non-admin-key")
-	recorder := httptest.NewRecorder()
-	h.ServeHTTP(recorder, req)
-
-	// Assert - should be forbidden
-	assert.Equal(t, http.StatusForbidden, recorder.Code)
-
-	var errResp map[string]interface{}
-	err := json.NewDecoder(recorder.Body).Decode(&errResp)
-	require.NoError(t, err)
-
-	assert.Equal(t, "/errors/forbidden", errResp["type"])
-	assert.Equal(t, "Admin privileges required to access audit logs", errResp["detail"])
-}
-
 // ============================================================
 // Tests for User Story 5 (T032, T033)
 // ============================================================
@@ -123,7 +89,7 @@ func TestAuditLogHandler_CreateAuditEvent(t *testing.T) {
 	defer db.Cleanup(t)
 
 	// Setup handler (any auth, not admin-only)
-	h := setupAuditLogHandler(t, db.Pool, false)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Create request
 	reqBody := handler.CreateAuditEventRequest{
@@ -159,7 +125,7 @@ func TestAuditLogHandler_CreateAuditEvent_AnyAuthAccess(t *testing.T) {
 	defer db.Cleanup(t)
 
 	// Setup handler - even non-admin can submit events
-	h := setupAuditLogHandler(t, db.Pool, false)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Create request
 	reqBody := handler.CreateAuditEventRequest{
@@ -183,7 +149,7 @@ func TestAuditLogHandler_CreateAuditEvent_MissingEventType(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)
 
-	h := setupAuditLogHandler(t, db.Pool, false)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Create request without event_type
 	reqBody := handler.CreateAuditEventRequest{}
@@ -210,7 +176,7 @@ func TestAuditLogHandler_CreateAuditEvent_EventTypeTooLong(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)
 
-	h := setupAuditLogHandler(t, db.Pool, false)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Create request with event_type > 50 chars
 	reqBody := handler.CreateAuditEventRequest{
@@ -248,7 +214,7 @@ func TestAuditLogHandler_ListAuditLogs_FilterByActor(t *testing.T) {
 	createTestAuditLog(t, db.Pool, "actor-2", "update", "broadcaster")
 	createTestAuditLog(t, db.Pool, "actor-1", "delete", "stream")
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Filter by actor-1
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?actor=actor-1", nil)
@@ -276,7 +242,7 @@ func TestAuditLogHandler_ListAuditLogs_FilterByAction(t *testing.T) {
 	createTestAuditLog(t, db.Pool, "test-actor", "update", "broadcaster")
 	createTestAuditLog(t, db.Pool, "test-actor", "create", "stream")
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Filter by action=create
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?action=create", nil)
@@ -304,7 +270,7 @@ func TestAuditLogHandler_ListAuditLogs_FilterByResourceType(t *testing.T) {
 	createTestAuditLog(t, db.Pool, "test-actor", "update", "stream")
 	createTestAuditLog(t, db.Pool, "test-actor", "delete", "broadcaster")
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Filter by resource_type=broadcaster
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?resource_type=broadcaster", nil)
@@ -334,7 +300,7 @@ func TestAuditLogHandler_ListAuditLogs_FilterByResourceID(t *testing.T) {
 	createTestAuditLogWithResourceID(t, db.Pool, "test-actor", "create", "broadcaster", &resourceID)
 	createTestAuditLogWithResourceID(t, db.Pool, "test-actor", "update", "broadcaster", &otherID)
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Filter by resource_id
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?resource_id="+resourceID.String(), nil)
@@ -363,7 +329,7 @@ func TestAuditLogHandler_ListAuditLogs_FilterByDateRange(t *testing.T) {
 	createTestAuditLogWithTimestamp(t, db.Pool, "test-actor", "create", "broadcaster", past)
 	createTestAuditLogWithTimestamp(t, db.Pool, "test-actor", "update", "stream", now)
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Filter to only include recent entries
 	from := now.Add(-1 * time.Hour).Format(time.RFC3339)
@@ -386,7 +352,7 @@ func TestAuditLogHandler_ListAuditLogs_InvalidResourceType(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Filter with invalid resource_type
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?resource_type=invalid_type", nil)
@@ -407,7 +373,7 @@ func TestAuditLogHandler_ListAuditLogs_InvalidDateFormat(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Filter with invalid date format
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?from=not-a-date", nil)
@@ -428,7 +394,7 @@ func TestAuditLogHandler_ListAuditLogs_InvalidResourceID(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Filter with invalid UUID
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?resource_id=not-a-uuid", nil)
@@ -458,7 +424,7 @@ func TestAuditLogHandler_ListAuditLogs_Pagination(t *testing.T) {
 		createTestAuditLog(t, db.Pool, "test-actor", "create", "broadcaster")
 	}
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Request with limit=5
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?limit=5", nil)
@@ -487,7 +453,7 @@ func TestAuditLogHandler_ListAuditLogs_PaginationWithOffset(t *testing.T) {
 		createTestAuditLog(t, db.Pool, "test-actor", "create", "broadcaster")
 	}
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Request with limit=5 and offset=5
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?limit=5&offset=5", nil)
@@ -511,7 +477,7 @@ func TestAuditLogHandler_ListAuditLogs_LimitExceedsMax(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Request with limit > 100 should be rejected
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?limit=200", nil)
@@ -532,7 +498,7 @@ func TestAuditLogHandler_ListAuditLogs_InvalidLimit(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Request with limit=0
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?limit=0", nil)
@@ -547,7 +513,7 @@ func TestAuditLogHandler_ListAuditLogs_NegativeOffset(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Request with negative offset
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?offset=-1", nil)
@@ -573,7 +539,7 @@ func TestAuditLogHandler_ListAuditLogs_LargeOffset(t *testing.T) {
 		createTestAuditLog(t, db.Pool, "test-actor", "create", "broadcaster")
 	}
 
-	h := setupAuditLogHandler(t, db.Pool, true)
+	h := setupAuditLogHandler(t, db.Pool)
 
 	// Request with offset beyond total
 	req := httptest.NewRequest(http.MethodGet, "/audit-logs?offset=100", nil)
@@ -596,14 +562,13 @@ func TestAuditLogHandler_ListAuditLogs_LargeOffset(t *testing.T) {
 // Helper Functions
 // ============================================================
 
-func setupAuditLogHandler(t *testing.T, pool *pgxpool.Pool, isAdmin bool) *handler.AuditLogHandler {
+func setupAuditLogHandler(t *testing.T, pool *pgxpool.Pool) *handler.AuditLogHandler {
 	t.Helper()
 
 	auditRepo := database.NewAuditLogRepo(pool)
 	auditService := service.NewAuditLogService(auditRepo)
-	adminChecker := &mockAdminChecker{isAdmin: isAdmin}
 
-	return handler.NewAuditLogHandler(auditService, adminChecker, nil)
+	return handler.NewAuditLogHandler(auditService, nil)
 }
 
 func addAPIKeyToContext(r *http.Request, apiKey string) *http.Request {

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,22 +14,15 @@ import (
 	"github.com/searchandrescuegg/rescuestream-api/internal/service"
 )
 
-// AdminChecker checks if an API key has admin privileges.
-type AdminChecker interface {
-	IsAdmin(ctx context.Context, apiKey string) (bool, error)
-}
-
 // AuditLogHandler handles audit log HTTP requests.
 type AuditLogHandler struct {
 	auditService *service.AuditLogService
-	adminChecker AdminChecker
 	logger       *slog.Logger
 }
 
 // NewAuditLogHandler creates a new AuditLogHandler.
 func NewAuditLogHandler(
 	auditService *service.AuditLogService,
-	adminChecker AdminChecker,
 	logger *slog.Logger,
 ) *AuditLogHandler {
 	if logger == nil {
@@ -38,7 +30,6 @@ func NewAuditLogHandler(
 	}
 	return &AuditLogHandler{
 		auditService: auditService,
-		adminChecker: adminChecker,
 		logger:       logger,
 	}
 }
@@ -82,22 +73,6 @@ func (h *AuditLogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // listAuditLogs handles GET /audit-logs.
 func (h *AuditLogHandler) listAuditLogs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	apiKey := APIKeyFromContext(ctx)
-
-	// Check admin status - only admins can access audit logs
-	isAdmin, err := h.adminChecker.IsAdmin(ctx, apiKey)
-	if err != nil {
-		h.logger.Error("failed to check admin status",
-			slog.String("error", err.Error()),
-			slog.String("api_key", apiKey),
-		)
-		WriteError(w, r, ErrInternalServer("Failed to verify admin status"))
-		return
-	}
-	if !isAdmin {
-		WriteError(w, r, ErrForbidden("Admin privileges required to access audit logs"))
-		return
-	}
 
 	// Parse query parameters into filter
 	filter, err := h.parseAuditLogFilter(r)
