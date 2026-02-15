@@ -48,9 +48,20 @@ type PaginationResponse struct {
 }
 
 // CreateAuditEventRequest is the request body for POST /audit-events.
+// All fields except event_type are optional and will use defaults if not specified.
 type CreateAuditEventRequest struct {
-	EventType string                 `json:"event_type"`
-	Metadata  map[string]interface{} `json:"metadata"`
+	// Required
+	EventType string `json:"event_type"`
+
+	// Optional overrides (defaults derived from request context)
+	Actor         *string                `json:"actor,omitempty"`
+	ResourceType  *string                `json:"resource_type,omitempty"`
+	ResourceID    *string                `json:"resource_id,omitempty"` // UUID string
+	RequestMethod *string                `json:"request_method,omitempty"`
+	RequestPath   *string                `json:"request_path,omitempty"`
+	Outcome       *string                `json:"outcome,omitempty"`
+	FailureReason *string                `json:"failure_reason,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // ServeHTTP routes audit log requests.
@@ -203,16 +214,44 @@ func (h *AuditLogHandler) createAuditEvent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Validate resource_id if provided
+	var resourceID *uuid.UUID
+	if req.ResourceID != nil {
+		parsed, err := uuid.Parse(*req.ResourceID)
+		if err != nil {
+			WriteError(w, r, ErrInvalidRequest("resource_id must be a valid UUID"))
+			return
+		}
+		resourceID = &parsed
+	}
+
+	// Validate outcome if provided
+	if req.Outcome != nil {
+		validOutcomes := map[string]bool{"success": true, "failure": true}
+		if !validOutcomes[*req.Outcome] {
+			WriteError(w, r, ErrInvalidRequest("outcome must be 'success' or 'failure'"))
+			return
+		}
+	}
+
 	ipAddress := getClientIP(r)
 
-	entry, err := h.auditService.CreateCustomEvent(
-		ctx,
-		apiKey,
-		req.EventType,
-		req.Metadata,
-		ipAddress,
-		requestID,
-	)
+	input := service.CreateCustomEventInput{
+		DefaultActor:     apiKey,
+		DefaultIPAddress: ipAddress,
+		DefaultRequestID: requestID,
+		EventType:        req.EventType,
+		Actor:            req.Actor,
+		ResourceType:     req.ResourceType,
+		ResourceID:       resourceID,
+		RequestMethod:    req.RequestMethod,
+		RequestPath:      req.RequestPath,
+		Outcome:          req.Outcome,
+		FailureReason:    req.FailureReason,
+		Metadata:         req.Metadata,
+	}
+
+	entry, err := h.auditService.CreateCustomEvent(ctx, input)
 	if err != nil {
 		WriteError(w, r, MapDomainError(err))
 		return

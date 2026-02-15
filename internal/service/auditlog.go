@@ -96,35 +96,75 @@ func (s *AuditLogService) List(ctx context.Context, filter domain.AuditLogFilter
 	return entries, total, nil
 }
 
+// CreateCustomEventInput holds input parameters for creating a custom audit event.
+type CreateCustomEventInput struct {
+	// Defaults (used if optional fields not provided)
+	DefaultActor     string
+	DefaultIPAddress string
+	DefaultRequestID string
+
+	// Required
+	EventType string
+
+	// Optional overrides
+	Actor         *string
+	ResourceType  *string
+	ResourceID    *uuid.UUID
+	RequestMethod *string
+	RequestPath   *string
+	Outcome       *string
+	FailureReason *string
+	Metadata      map[string]interface{}
+}
+
 // CreateCustomEvent creates an audit entry for a custom event.
 func (s *AuditLogService) CreateCustomEvent(
 	ctx context.Context,
-	actor string,
-	eventType string,
-	metadata map[string]interface{},
-	ipAddress string,
-	requestID string,
+	input CreateCustomEventInput,
 ) (*domain.AuditLogEntry, error) {
+	// Use provided values or defaults
+	actor := input.DefaultActor
+	if input.Actor != nil {
+		actor = *input.Actor
+	}
+
+	requestMethod := "POST"
+	if input.RequestMethod != nil {
+		requestMethod = *input.RequestMethod
+	}
+
+	requestPath := "/audit-events"
+	if input.RequestPath != nil {
+		requestPath = *input.RequestPath
+	}
+
+	outcome := "success"
+	if input.Outcome != nil {
+		outcome = *input.Outcome
+	}
+
+	metadata := input.Metadata
 	if metadata == nil {
 		metadata = make(map[string]interface{})
 	}
 
 	var reqID *string
-	if requestID != "" {
-		reqID = &requestID
+	if input.DefaultRequestID != "" {
+		reqID = &input.DefaultRequestID
 	}
 
 	entry := &domain.AuditLogEntry{
 		ID:            uuid.New(),
 		Timestamp:     time.Now(),
 		Actor:         actor,
-		Action:        eventType,
-		ResourceType:  nil,
-		ResourceID:    nil,
-		RequestMethod: "POST",
-		RequestPath:   "/audit-events",
-		IPAddress:     ipAddress,
-		Outcome:       "success",
+		Action:        input.EventType,
+		ResourceType:  input.ResourceType,
+		ResourceID:    input.ResourceID,
+		RequestMethod: requestMethod,
+		RequestPath:   requestPath,
+		IPAddress:     input.DefaultIPAddress,
+		Outcome:       outcome,
+		FailureReason: input.FailureReason,
 		Metadata:      metadata,
 		RequestID:     reqID,
 	}
@@ -132,7 +172,7 @@ func (s *AuditLogService) CreateCustomEvent(
 	if err := s.auditRepo.Create(ctx, entry); err != nil {
 		s.logger.Error("failed to create custom audit event",
 			slog.String("error", err.Error()),
-			slog.String("event_type", eventType),
+			slog.String("event_type", input.EventType),
 			slog.String("actor", actor),
 		)
 		return nil, err
@@ -140,7 +180,7 @@ func (s *AuditLogService) CreateCustomEvent(
 
 	s.logger.Debug("custom audit event created",
 		slog.String("entry_id", entry.ID.String()),
-		slog.String("event_type", eventType),
+		slog.String("event_type", input.EventType),
 		slog.String("actor", actor),
 	)
 
