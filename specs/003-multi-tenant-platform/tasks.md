@@ -51,9 +51,9 @@ description: "Dependency-ordered tasks for API multi-tenant platform implementat
 
 ### Shared primitives
 
-- [ ] T015 [P] Implement peppered HMAC hasher in `internal/pepper/pepper.go`: `Hash(plain string) string`, `Verify(plain, hashHex string) bool`, `VerifyWithPrev(plain, hashHex string) (bool, bool)` (second bool true if matched via prev pepper). Functional-options-style constructor taking current and optional prev pepper.
-- [ ] T016 [P] Implement ACL evaluator in `internal/acl/evaluator.go` per research §8: pure function `Evaluate(rs RuleSet, a Attrs) bool`, plus `Access(role, userAttrs, roomScope, teamID, ruleSet) AccessDecision`. No DB.
-- [ ] T017 [P] Implement optimistic-concurrency helper in `internal/database/concurrency.go`: wraps `RowsAffected` check after UPDATE, returns typed `ErrStaleVersion` with current version fetched on conflict.
+- [X] T015 [P] Implement peppered HMAC hasher in `internal/pepper/pepper.go`: `Hash(plain string) string`, `Verify(plain, hashHex string) bool`, `VerifyWithPrev(plain, hashHex string) (bool, bool)` (second bool true if matched via prev pepper). Functional-options-style constructor taking current and optional prev pepper.
+- [X] T016 [P] Implement ACL evaluator in `internal/acl/evaluator.go` per research §8: pure function `Evaluate(rs RuleSet, a Attrs) bool`, plus `Access(role, userAttrs, roomScope, teamID, ruleSet) AccessDecision`. No DB.
+- [X] T017 [P] Implement optimistic-concurrency helper in `internal/database/concurrency.go`: wraps `RowsAffected` check after UPDATE, returns typed `ErrStaleVersion` with current version fetched on conflict.
 - [ ] T018 [P] Implement in-process SSE hub in `internal/service/streamevents/hub.go`: goroutine-safe map user_id → []chan Event, methods `Subscribe(ctx, userID) (<-chan Event, func())`, `Publish(evt Event)`. Per research §4.
 - [ ] T019 [P] Implement Postgres NOTIFY consumer in `internal/service/streamevents/listener.go`: long-lived LISTEN goroutine on `stream_events` channel that decodes JSON payloads and forwards into the hub. Functional options for channel name and reconnect behavior.
 - [ ] T020 [P] Implement embedded Tailscale client in `internal/tsnet/client.go`: builds a `tsnet.Server` when `TAILSCALE_ENABLED=true`, else returns a plain `http.Client`. Exposes `HTTPClient() *http.Client` and `Dial(ctx, network, addr)`. Functional options for hostname, tags, state dir.
@@ -82,9 +82,9 @@ description: "Dependency-ordered tasks for API multi-tenant platform implementat
 
 ### Foundation tests
 
-- [ ] T034 [P] Unit test for `internal/pepper` in `internal/pepper/pepper_test.go`: hash determinism, verify match/no-match, prev-pepper fallback.
-- [ ] T035 [P] Unit tests for `internal/acl/evaluator` in `internal/acl/evaluator_test.go`: property-based sweep of AND/OR/team/tag/user combinations; team-scope gate; admin bypass.
-- [ ] T036 [P] Unit test for `internal/database/concurrency` in `internal/database/concurrency_test.go`: stale-version detection, success path.
+- [X] T034 [P] Unit test for `internal/pepper` in `internal/pepper/pepper_test.go`: hash determinism, verify match/no-match, prev-pepper fallback.
+- [X] T035 [P] Unit tests for `internal/acl/evaluator` in `internal/acl/evaluator_test.go`: property-based sweep of AND/OR/team/tag/user combinations; team-scope gate; admin bypass.
+- [X] T036 [P] Unit test for `internal/database/concurrency` in `internal/database/concurrency_test.go`: stale-version detection, success path.
 - [ ] T037 [P] Integration test in `tests/integration/session_test.go` using testcontainers-Postgres: login-complete, sign request with issued key, revoke, subsequent request is rejected within the freshness budget (SC-011).
 - [ ] T038 [P] Integration test in `tests/integration/tenancy_test.go`: org A admin cannot read org B resources; super-admin can.
 - [ ] T039 Integration test in `tests/integration/sse_hub_test.go`: cross-goroutine publish→subscribe delivery; multi-subscriber fan-out; ACL-based filtering.
