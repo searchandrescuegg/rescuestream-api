@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/searchandrescuegg/rescuestream-api/internal/handler"
+	"github.com/searchandrescuegg/rescuestream-api/internal/service"
 )
 
 // Option is a functional option for configuring the server.
@@ -29,6 +30,10 @@ type Server struct {
 	streamKeyHandler   http.Handler
 	broadcasterHandler http.Handler
 	healthHandler      http.Handler
+	auditLogHandler    http.Handler
+
+	// Service dependencies for middleware
+	auditService *service.AuditLogService
 }
 
 // WithLogger sets the logger for the server.
@@ -87,6 +92,20 @@ func WithHealthHandler(h http.Handler) Option {
 	}
 }
 
+// WithAuditLogHandler sets the audit log handler.
+func WithAuditLogHandler(h http.Handler) Option {
+	return func(s *Server) {
+		s.auditLogHandler = h
+	}
+}
+
+// WithAuditService sets the audit log service for middleware.
+func WithAuditService(svc *service.AuditLogService) Option {
+	return func(s *Server) {
+		s.auditService = svc
+	}
+}
+
 // New creates a new server with the given options.
 func New(port int, opts ...Option) *Server {
 	s := &Server{
@@ -136,6 +155,11 @@ func (s *Server) setupRoutes() {
 		protected := s.router.PathPrefix("").Subrouter()
 		protected.Use(s.authMiddleware.Authenticate)
 
+		// Add audit middleware if audit service is configured
+		if s.auditService != nil {
+			protected.Use(handler.AuditMiddleware(s.auditService, s.logger))
+		}
+
 		if s.streamHandler != nil {
 			protected.Handle("/streams", s.streamHandler).Methods(http.MethodGet)
 			protected.Handle("/streams/{id}", s.streamHandler).Methods(http.MethodGet)
@@ -149,6 +173,11 @@ func (s *Server) setupRoutes() {
 		if s.broadcasterHandler != nil {
 			protected.Handle("/broadcasters", s.broadcasterHandler).Methods(http.MethodGet, http.MethodPost)
 			protected.Handle("/broadcasters/{id}", s.broadcasterHandler).Methods(http.MethodGet, http.MethodPatch, http.MethodDelete)
+		}
+
+		if s.auditLogHandler != nil {
+			protected.Handle("/audit-logs", s.auditLogHandler).Methods(http.MethodGet)
+			protected.Handle("/audit-events", s.auditLogHandler).Methods(http.MethodPost)
 		}
 	}
 }
