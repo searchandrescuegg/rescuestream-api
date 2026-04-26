@@ -44,6 +44,19 @@ const (
 	ErrorTypeStreamKeyInUse   = "/errors/stream-key-in-use"
 	ErrorTypeStreamKeyRevoked = "/errors/stream-key-revoked"
 	ErrorTypeStreamKeyExpired = "/errors/stream-key-expired"
+
+	// 003-multi-tenant-platform problem types.
+	ErrorTypeNoOrgMembership      = "/problems/no-org-membership"
+	ErrorTypeNotInOrg             = "/problems/not-in-org"
+	ErrorTypeACLDenied            = "/problems/acl-denied"
+	ErrorTypeRoomArchived         = "/problems/room-archived"
+	ErrorTypeStaleRoomVersion     = "/problems/stale-room-version"
+	ErrorTypeDeviceKeyRevoked     = "/problems/device-key-revoked"
+	ErrorTypeSessionInvalidated   = "/problems/session-invalidated"
+	ErrorTypeWorkspaceDomainTaken = "/problems/workspace-domain-taken"
+	ErrorTypeLastSuperAdmin       = "/problems/last-super-admin"
+	ErrorTypeRetiredEndpoint      = "/problems/retired-endpoint"
+	ErrorTypeOrgSuspended         = "/problems/org-suspended"
 )
 
 // ErrNotFound creates a not found error.
@@ -160,6 +173,86 @@ func MapDomainError(err error) *HTTPError {
 		return ErrForbidden("Admin privileges required")
 	case errors.Is(err, domain.ErrForbidden):
 		return ErrForbidden("Access denied")
+
+	// --- 003-multi-tenant-platform mappings ---
+	case errors.Is(err, domain.ErrNoOrgMembership):
+		return &HTTPError{
+			Status: http.StatusForbidden,
+			Type:   ErrorTypeNoOrgMembership,
+			Title:  "No Organization Membership",
+			Detail: "Your account is not associated with any organization yet",
+		}
+	case errors.Is(err, domain.ErrNotInOrg):
+		return &HTTPError{
+			Status: http.StatusForbidden,
+			Type:   ErrorTypeNotInOrg,
+			Title:  "Resource Belongs To A Different Organization",
+			Detail: "You do not have access to resources outside your organization",
+		}
+	case errors.Is(err, domain.ErrACLDenied):
+		return &HTTPError{
+			Status: http.StatusForbidden,
+			Type:   ErrorTypeACLDenied,
+			Title:  "Access Denied",
+			Detail: "Your attributes do not satisfy this room's access control rules",
+		}
+	case errors.Is(err, domain.ErrRoomArchived):
+		return &HTTPError{
+			Status: http.StatusConflict,
+			Type:   ErrorTypeRoomArchived,
+			Title:  "Room Archived",
+			Detail: "This room is archived and rejects new streams or mutations",
+		}
+	case errors.Is(err, domain.ErrStaleRoomVersion):
+		return &HTTPError{
+			Status: http.StatusConflict,
+			Type:   ErrorTypeStaleRoomVersion,
+			Title:  "Stale Room Version",
+			Detail: "The room was modified by someone else; refresh and retry",
+		}
+	case errors.Is(err, domain.ErrDeviceKeyRevoked):
+		return &HTTPError{
+			Status: http.StatusUnauthorized,
+			Type:   ErrorTypeDeviceKeyRevoked,
+			Title:  "Device Key Revoked",
+			Detail: "The provided device key has been revoked",
+		}
+	case errors.Is(err, domain.ErrSessionInvalidated):
+		return &HTTPError{
+			Status: http.StatusUnauthorized,
+			Type:   ErrorTypeSessionInvalidated,
+			Title:  "Session Invalidated",
+			Detail: "Your session has been invalidated; please sign in again",
+		}
+	case errors.Is(err, domain.ErrWorkspaceDomainTaken):
+		return &HTTPError{
+			Status: http.StatusConflict,
+			Type:   ErrorTypeWorkspaceDomainTaken,
+			Title:  "Workspace Domain Already Taken",
+			Detail: "Another team has already claimed this workspace domain",
+		}
+	case errors.Is(err, domain.ErrLastSuperAdmin):
+		return &HTTPError{
+			Status: http.StatusConflict,
+			Type:   ErrorTypeLastSuperAdmin,
+			Title:  "Cannot Remove The Last Super-Admin",
+			Detail: "At least one super-admin must remain on the platform at all times",
+		}
+	case errors.Is(err, domain.ErrRetiredEndpoint):
+		return &HTTPError{
+			Status: http.StatusGone,
+			Type:   ErrorTypeRetiredEndpoint,
+			Title:  "Endpoint Retired",
+			Detail: "This endpoint has been retired in favor of a v2 replacement",
+		}
+	case errors.Is(err, domain.ErrOrgSuspended):
+		return &HTTPError{
+			Status: http.StatusForbidden,
+			Type:   ErrorTypeOrgSuspended,
+			Title:  "Organization Suspended",
+			Detail: "This organization is currently suspended; contact a platform administrator",
+		}
+
 	default:
 		return ErrInternalServer("An unexpected error occurred")
 	}

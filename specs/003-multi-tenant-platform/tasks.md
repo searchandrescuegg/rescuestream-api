@@ -57,14 +57,14 @@ description: "Dependency-ordered tasks for API multi-tenant platform implementat
 - [ ] T018 [P] Implement in-process SSE hub in `internal/service/streamevents/hub.go`: goroutine-safe map user_id → []chan Event, methods `Subscribe(ctx, userID) (<-chan Event, func())`, `Publish(evt Event)`. Per research §4.
 - [ ] T019 [P] Implement Postgres NOTIFY consumer in `internal/service/streamevents/listener.go`: long-lived LISTEN goroutine on `stream_events` channel that decodes JSON payloads and forwards into the hub. Functional options for channel name and reconnect behavior.
 - [ ] T020 [P] Implement embedded Tailscale client in `internal/tsnet/client.go`: builds a `tsnet.Server` when `TAILSCALE_ENABLED=true`, else returns a plain `http.Client`. Exposes `HTTPClient() *http.Client` and `Dial(ctx, network, addr)`. Functional options for hostname, tags, state dir.
-- [ ] T021 [P] Add new RFC 9457 problem types in `internal/handler/problems.go`: `no-org-membership`, `not-in-org`, `acl-denied`, `room-archived`, `stale-room-version` (includes `instance.metadata.current_version`), `device-key-revoked`, `session-invalidated`, `workspace-domain-taken`, `last-super-admin`, `retired-endpoint`.
+- [X] T021 [P] Add new RFC 9457 problem types in `internal/handler/problems.go`: `no-org-membership`, `not-in-org`, `acl-denied`, `room-archived`, `stale-room-version` (includes `instance.metadata.current_version`), `device-key-revoked`, `session-invalidated`, `workspace-domain-taken`, `last-super-admin`, `retired-endpoint`. _(Implementation note: extended the existing `internal/handler/errors.go` rather than creating a parallel `problems.go`; same constants live alongside v1 problem types. Also added `org-suspended`. The `stale-room-version` `instance.metadata.current_version` payload is wired in when the room handler lands.)_
 
 ### Core domain + repos used by multiple stories
 
-- [ ] T022 Implement `internal/domain/user/user.go`: User struct + invariants (email normalization, google_subject optional).
-- [ ] T023 [P] Implement `internal/domain/org/org.go`: Organization struct, status enum, invariants.
-- [ ] T024 Implement `internal/database/userrepo/repo.go`: Upsert-by-google-subject, FindByEmail, FindByID, FindBySubject. pgx-based, uses prepared statements.
-- [ ] T025 Implement `internal/database/orgrepo/repo.go`: Create, Get, List (paginated, with optional `q` typeahead), Update, SuspendUnsuspend, Delete, Counts. Every method takes a `callerCtx` holding caller identity to enforce tenancy at repo boundary.
+- [X] T022 Implement `internal/domain/user/user.go`: User struct + invariants (email normalization, google_subject optional). _(Landed at `internal/domain/user.go` to match the flat single-file convention used by existing v1 entities.)_
+- [X] T023 [P] Implement `internal/domain/org/org.go`: Organization struct, status enum, invariants. _(Landed at `internal/domain/organization.go`.)_
+- [X] T024 Implement `internal/database/userrepo/repo.go`: Upsert-by-google-subject, FindByEmail, FindByID, FindBySubject. pgx-based, uses prepared statements. _(Landed at `internal/database/user_repo.go`. Upsert handles the audit-actor→Google-login upgrade path: an existing email-only row is matched by email and gets google_subject + display_name filled in.)_
+- [X] T025 Implement `internal/database/orgrepo/repo.go`: Create, Get, List (paginated, with optional `q` typeahead), Update, SuspendUnsuspend, Delete, Counts. _(Landed at `internal/database/organization_repo.go`. Slug uniqueness violations are mapped to `domain.ErrAlreadyExists` via Postgres SQLSTATE inspection. Tenancy enforcement at the service layer rather than per-method `callerCtx` parameter to match v1 repo conventions.)_
 
 ### Session store + auth middleware
 
