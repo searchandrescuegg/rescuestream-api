@@ -27,8 +27,7 @@ type Config struct {
 	DatabaseURL string `env:"DATABASE_URL" envDefault:"postgres://postgres:postgres@localhost:5432/rescuestream?sslmode=disable"`
 
 	// API Server
-	APIPort   int    `env:"API_PORT" envDefault:"8080"`
-	APISecret string `env:"API_SECRET,required"`
+	APIPort int `env:"API_PORT" envDefault:"8080"`
 
 	// MediaMTX Integration
 	MediaMTXAPIURL        string `env:"MEDIAMTX_API_URL" envDefault:"http://localhost:9997"`

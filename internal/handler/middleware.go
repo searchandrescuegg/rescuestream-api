@@ -3,29 +3,19 @@ package handler
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
-	"alpineworks.io/rfc9457"
 	"github.com/google/uuid"
 
 	"github.com/searchandrescuegg/rescuestream-api/internal/domain"
 	"github.com/searchandrescuegg/rescuestream-api/internal/service"
-)
-
-const (
-	// MaxTimestampDrift is the maximum allowed time difference for request timestamps (5 minutes)
-	MaxTimestampDrift = 5 * time.Minute
 )
 
 type contextKey string
@@ -34,7 +24,27 @@ const (
 	requestIDKey  contextKey = "request_id"
 	apiKeyKey     contextKey = "api_key"
 	auditStateKey contextKey = "audit_state"
+	sessionIDKey  contextKey = "session_id"
+	userIDKey     contextKey = "user_id"
 )
+
+// SessionIDFromContext returns the authenticated session id (uuid.Nil
+// if no auth ran on this request).
+func SessionIDFromContext(ctx context.Context) uuid.UUID {
+	if id, ok := ctx.Value(sessionIDKey).(uuid.UUID); ok {
+		return id
+	}
+	return uuid.Nil
+}
+
+// UserIDFromContext returns the authenticated user id (uuid.Nil if no
+// auth ran on this request).
+func UserIDFromContext(ctx context.Context) uuid.UUID {
+	if id, ok := ctx.Value(userIDKey).(uuid.UUID); ok {
+		return id
+	}
+	return uuid.Nil
+}
 
 // AuditState holds before/after state for update operations.
 type AuditState struct {
@@ -136,29 +146,36 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// KeyStore provides access to API keys and their secrets
-type KeyStore interface {
-	GetSecret(apiKey string) (string, error)
-}
-
-// AuthMiddleware provides HMAC authentication middleware
+// AuthMiddleware authenticates v2 HMAC-signed requests against the
+// server-side session store. Replaces the v1 shared API_SECRET path.
 type AuthMiddleware struct {
-	keyStore KeyStore
+	sessions *service.SessionService
 	logger   *slog.Logger
 }
 
-// NewAuthMiddleware creates a new authentication middleware
-func NewAuthMiddleware(keyStore KeyStore, logger *slog.Logger) *AuthMiddleware {
-	return &AuthMiddleware{
-		keyStore: keyStore,
-		logger:   logger,
+// NewAuthMiddleware constructs a session-backed authentication middleware.
+func NewAuthMiddleware(sessions *service.SessionService, logger *slog.Logger) *AuthMiddleware {
+	if logger == nil {
+		logger = slog.Default()
 	}
+	return &AuthMiddleware{sessions: sessions, logger: logger}
 }
 
-// Authenticate wraps an HTTP handler with authentication
+// Authenticate validates X-API-Key + X-Signature + X-Timestamp on every
+// request. On success the session id, user id, and X-API-Key (legacy
+// `apiKey` context value, for the audit middleware's actor field) are
+// attached to the request context.
+//
+// Auth failure modes are surfaced as RFC 9457 problems:
+//
+//   - missing/blank headers       → /errors/unauthorized (401)
+//   - body-read failure           → /errors/internal-error (500)
+//   - any session-validation
+//     failure (revoked, expired,
+//     unknown key, bad signature,
+//     drifted clock)              → /problems/session-invalidated (401)
 func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Extract headers
 		apiKey := r.Header.Get("X-API-Key")
 		signature := r.Header.Get("X-Signature")
 		timestampStr := r.Header.Get("X-Timestamp")
@@ -170,119 +187,63 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 				slog.Bool("has_signature", signature != ""),
 				slog.Bool("has_timestamp", timestampStr != ""),
 			)
-			rfc9457.NewRFC9457(
-				rfc9457.WithStatus(http.StatusUnauthorized),
-				rfc9457.WithTitle("Unauthorized"),
-				rfc9457.WithDetail("Missing authentication headers (X-API-Key, X-Signature, X-Timestamp)"),
-				rfc9457.WithInstance(r.URL.Path),
-			).ServeHTTP(w, r)
+			WriteError(w, r, ErrUnauthorized("Missing authentication headers (X-API-Key, X-Signature, X-Timestamp)"))
 			return
 		}
 
-		// Parse timestamp
-		timestamp, err := strconv.ParseInt(timestampStr, 10, 64)
-		if err != nil {
-			m.logger.Warn("invalid timestamp format",
-				slog.String("timestamp", timestampStr),
-				slog.String("error", err.Error()),
-			)
-			rfc9457.NewRFC9457(
-				rfc9457.WithStatus(http.StatusUnauthorized),
-				rfc9457.WithTitle("Unauthorized"),
-				rfc9457.WithDetail("Invalid timestamp format"),
-				rfc9457.WithInstance(r.URL.Path),
-			).ServeHTTP(w, r)
-			return
-		}
-
-		// Check timestamp drift (prevent replay attacks)
-		requestTime := time.Unix(timestamp, 0)
-		timeDiff := time.Since(requestTime)
-		if timeDiff < -MaxTimestampDrift || timeDiff > MaxTimestampDrift {
-			m.logger.Warn("timestamp out of acceptable range",
-				slog.String("api_key", apiKey),
-				slog.Time("request_time", requestTime),
-				slog.Duration("time_diff", timeDiff),
-			)
-			rfc9457.NewRFC9457(
-				rfc9457.WithStatus(http.StatusUnauthorized),
-				rfc9457.WithTitle("Unauthorized"),
-				rfc9457.WithDetail("Request timestamp is too old or in the future"),
-				rfc9457.WithInstance(r.URL.Path),
-			).ServeHTTP(w, r)
-			return
-		}
-
-		// Get secret for this API key
-		secret, err := m.keyStore.GetSecret(apiKey)
-		if err != nil {
-			m.logger.Warn("unknown API key",
-				slog.String("api_key", apiKey),
-				slog.String("remote_addr", r.RemoteAddr),
-			)
-			rfc9457.NewRFC9457(
-				rfc9457.WithStatus(http.StatusUnauthorized),
-				rfc9457.WithTitle("Unauthorized"),
-				rfc9457.WithDetail("Invalid API key"),
-				rfc9457.WithInstance(r.URL.Path),
-			).ServeHTTP(w, r)
-			return
-		}
-
-		// Read body to compute signature
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			m.logger.Error("failed to read request body",
-				slog.String("error", err.Error()),
-			)
-			rfc9457.NewRFC9457(
-				rfc9457.WithStatus(http.StatusInternalServerError),
-				rfc9457.WithTitle("Internal Server Error"),
-				rfc9457.WithDetail("Failed to read request body"),
-				rfc9457.WithInstance(r.URL.Path),
-			).ServeHTTP(w, r)
+			m.logger.Error("failed to read request body", slog.String("error", err.Error()))
+			WriteError(w, r, ErrInternalServer("Failed to read request body"))
 			return
 		}
-		// Restore body for downstream handlers
+		// Restore body for downstream handlers.
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-		// Compute expected signature
-		stringToSign := fmt.Sprintf("%s\n%s\n%d\n%s",
-			r.Method,
-			r.URL.Path,
-			timestamp,
-			string(bodyBytes),
-		)
-
-		h := hmac.New(sha256.New, []byte(secret))
-		h.Write([]byte(stringToSign))
-		expectedSignature := hex.EncodeToString(h.Sum(nil))
-
-		// Compare signatures using constant-time comparison
-		if subtle.ConstantTimeCompare([]byte(signature), []byte(expectedSignature)) != 1 {
-			m.logger.Warn("signature verification failed",
+		row, err := m.sessions.ValidateSignedRequest(r.Context(), service.SignedRequest{
+			APIKey:       apiKey,
+			Signature:    signature,
+			TimestampStr: timestampStr,
+			Method:       r.Method,
+			Path:         r.URL.Path,
+			Body:         bodyBytes,
+		})
+		if err != nil {
+			if errors.Is(err, domain.ErrSessionInvalidated) {
+				m.logger.Warn("session invalidated",
+					slog.String("api_key", apiKey),
+					slog.String("remote_addr", r.RemoteAddr),
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+				)
+				WriteError(w, r, MapDomainError(domain.ErrSessionInvalidated))
+				return
+			}
+			// Anything else (missing-headers leak-through, infra
+			// failure, etc.) is a client mistake or operator issue —
+			// surface as 401 rather than expose internals.
+			m.logger.Error("session validation error",
+				slog.String("error", err.Error()),
 				slog.String("api_key", apiKey),
-				slog.String("remote_addr", r.RemoteAddr),
-				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
 			)
-			rfc9457.NewRFC9457(
-				rfc9457.WithStatus(http.StatusUnauthorized),
-				rfc9457.WithTitle("Unauthorized"),
-				rfc9457.WithDetail("Invalid signature"),
-				rfc9457.WithInstance(r.URL.Path),
-			).ServeHTTP(w, r)
+			WriteError(w, r, ErrUnauthorized("Authentication failed"))
 			return
 		}
 
-		// Authentication successful - add API key to context
-		m.logger.Debug("request authenticated successfully",
-			slog.String("api_key", apiKey),
+		m.logger.Debug("request authenticated",
+			slog.String("session_id", row.ID.String()),
+			slog.String("user_id", row.UserID.String()),
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 		)
 
-		ctx := context.WithValue(r.Context(), apiKeyKey, apiKey)
+		ctx := context.WithValue(r.Context(), sessionIDKey, row.ID)
+		ctx = context.WithValue(ctx, userIDKey, row.UserID)
+		// apiKeyKey is preserved as the X-API-Key value so the existing
+		// audit middleware's actor field continues to identify the
+		// session uniquely. The v2 audit log vocabulary rewrite (T032)
+		// will switch the actor source to the user_id.
+		ctx = context.WithValue(ctx, apiKeyKey, apiKey)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

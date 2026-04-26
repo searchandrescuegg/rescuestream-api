@@ -42,7 +42,6 @@ primary_region = "sea"
 
 # Secrets are provisioned via `flyctl secrets set` and are NOT declared here:
 #   DATABASE_URL (Neon pooler endpoint, for request handlers)
-#   API_SECRET (legacy; to be retired once per-user HMAC sessions ship)
 #   SUPER_ADMIN_EMAILS
 #   DEVICE_KEY_PEPPER
 #   DEVICE_KEY_PEPPER_PREV (optional, during rotation windows)

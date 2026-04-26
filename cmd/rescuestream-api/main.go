@@ -17,6 +17,7 @@ import (
 	"github.com/searchandrescuegg/rescuestream-api/internal/database"
 	"github.com/searchandrescuegg/rescuestream-api/internal/handler"
 	"github.com/searchandrescuegg/rescuestream-api/internal/logging"
+	"github.com/searchandrescuegg/rescuestream-api/internal/pepper"
 	"github.com/searchandrescuegg/rescuestream-api/internal/server"
 	"github.com/searchandrescuegg/rescuestream-api/internal/service"
 )
@@ -112,21 +113,32 @@ func main() {
 	// at the v2 cutover; their v2 replacements land with the device + room
 	// + session work in subsequent commits).
 	auditLogRepo := database.NewAuditLogRepo(pool)
+	sessionRepo := database.NewSessionRepo(pool)
+
+	// Build the peppered HMAC hasher used for session secret hashing.
+	// SESSION_SECRET_PEPPER is required at boot; the hasher itself
+	// validates the minimum length.
+	sessionPepper, err := pepper.New(c.SessionSecretPepper)
+	if err != nil {
+		slog.Error("invalid SESSION_SECRET_PEPPER", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 
 	// Create services
 	auditLogService := service.NewAuditLogService(auditLogRepo, service.WithAuditLogLogger(logger))
+	sessionService := service.NewSessionService(sessionRepo, sessionPepper,
+		service.WithSlidingExpiry(time.Duration(c.SessionExpiryDays)*24*time.Hour),
+	)
 
 	// Create handlers
 	healthHandler := handler.NewHealthHandler(pool)
 	auditLogHandler := handler.NewAuditLogHandler(auditLogService, logger)
 
-	// Create key store for HMAC auth.
-	// TODO(003-multi-tenant-platform T028/T029): replace EnvKeyStore +
-	// shared API_SECRET with the per-user-session HMAC store
-	// (sessions table, peppered hashes). Until then this is what gates
-	// every authenticated v2 endpoint that lands on this branch.
-	keyStore := handler.NewEnvKeyStore(c.APISecret)
-	authMiddleware := handler.NewAuthMiddleware(keyStore, logger)
+	// AuthMiddleware authenticates every protected request against the
+	// server-side session store (research §3). The shared API_SECRET path
+	// from v1 is gone — sessions are minted out of the OAuth callback
+	// handler (lands with US2 sign-in flow).
+	authMiddleware := handler.NewAuthMiddleware(sessionService, logger)
 
 	// Create and start HTTP server
 	srv := server.New(c.APIPort,
