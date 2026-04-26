@@ -40,8 +40,8 @@ func TestAuditMiddleware_RecordsPostRequest(t *testing.T) {
 	middleware := handler.AuditMiddleware(auditService, nil)
 	wrappedHandler := middleware(testHandler)
 
-	// Execute POST request
-	req := httptest.NewRequest(http.MethodPost, "/broadcasters", nil)
+	// Execute POST request against a v2 collection path.
+	req := httptest.NewRequest(http.MethodPost, "/organizations", nil)
 	req = addAPIKeyToContext(req, "test-api-key")
 	req = addRequestIDToContext(req, "req-123")
 	req.RemoteAddr = "192.168.1.1:12345"
@@ -61,9 +61,9 @@ func TestAuditMiddleware_RecordsPostRequest(t *testing.T) {
 	entry := entries[0]
 	assert.Equal(t, "test-api-key", entry.Actor)
 	assert.Equal(t, "create", entry.Action)
-	assert.Equal(t, "broadcaster", *entry.ResourceType)
+	assert.Equal(t, "organizations", *entry.ResourceType)
 	assert.Equal(t, "POST", entry.RequestMethod)
-	assert.Equal(t, "/broadcasters", entry.RequestPath)
+	assert.Equal(t, "/organizations", entry.RequestPath)
 	assert.Equal(t, "192.168.1.1", entry.IPAddress)
 	assert.Equal(t, "success", entry.Outcome)
 }
@@ -84,8 +84,8 @@ func TestAuditMiddleware_RecordsDeleteRequest(t *testing.T) {
 	middleware := handler.AuditMiddleware(auditService, nil)
 	wrappedHandler := middleware(testHandler)
 
-	// Execute DELETE request
-	req := httptest.NewRequest(http.MethodDelete, "/broadcasters/"+resourceID.String(), nil)
+	// Execute DELETE request against a v2 resource-instance path.
+	req := httptest.NewRequest(http.MethodDelete, "/organizations/"+resourceID.String(), nil)
 	req = addAPIKeyToContext(req, "admin-key")
 	recorder := httptest.NewRecorder()
 	wrappedHandler.ServeHTTP(recorder, req)
@@ -100,7 +100,7 @@ func TestAuditMiddleware_RecordsDeleteRequest(t *testing.T) {
 
 	entry := entries[0]
 	assert.Equal(t, "delete", entry.Action)
-	assert.Equal(t, "broadcaster", *entry.ResourceType)
+	assert.Equal(t, "organizations", *entry.ResourceType)
 	assert.Equal(t, &resourceID, entry.ResourceID)
 	assert.Equal(t, "success", entry.Outcome)
 }
@@ -229,38 +229,6 @@ func TestAuditMiddleware_RecordsFailure(t *testing.T) {
 	assert.Equal(t, "failure", entry.Outcome)
 	assert.NotNil(t, entry.FailureReason)
 	assert.Equal(t, "HTTP 400", *entry.FailureReason)
-}
-
-func TestAuditMiddleware_ExtractsResourceInfoFromStreamKeys(t *testing.T) {
-	db := testutil.SetupTestDatabase(t)
-	defer db.Cleanup(t)
-
-	auditRepo := database.NewAuditLogRepo(db.Pool)
-	auditService := service.NewAuditLogService(auditRepo)
-
-	resourceID := uuid.New()
-
-	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	middleware := handler.AuditMiddleware(auditService, nil)
-	wrappedHandler := middleware(testHandler)
-
-	req := httptest.NewRequest(http.MethodDelete, "/stream-keys/"+resourceID.String(), nil)
-	req = addAPIKeyToContext(req, "test-key")
-	recorder := httptest.NewRecorder()
-	wrappedHandler.ServeHTTP(recorder, req)
-
-	time.Sleep(10 * time.Millisecond)
-
-	entries, _, err := auditRepo.List(context.Background(), domain.AuditLogFilter{Limit: 10})
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-
-	// stream-keys should be mapped to stream_key
-	assert.Equal(t, "stream_key", *entries[0].ResourceType)
-	assert.Equal(t, &resourceID, entries[0].ResourceID)
 }
 
 func TestAuditMiddleware_HandlesXForwardedFor(t *testing.T) {

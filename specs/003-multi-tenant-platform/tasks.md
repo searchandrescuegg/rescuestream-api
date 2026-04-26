@@ -306,7 +306,7 @@ description: "Dependency-ordered tasks for API multi-tenant platform implementat
 
 ## Phase 9: Polish & Cross-Cutting
 
-- [ ] T109 [P] Retire v1 routes: delete `internal/handler/broadcaster.go`, `internal/handler/streamkey.go`, `internal/service/broadcaster/*`, `internal/service/streamkey/*`, `internal/database/broadcaster_repo.go`, `internal/database/streamkey_repo.go`, and related tests.
+- [X] T109 [P] Retire v1 routes: delete `internal/handler/broadcaster.go`, `internal/handler/streamkey.go`, `internal/service/broadcaster/*`, `internal/service/streamkey/*`, `internal/database/broadcaster_repo.go`, `internal/database/streamkey_repo.go`, and related tests. _(Pulled forward from Phase 9 in the same rip-out commit. Also deleted `internal/handler/{auth,webhook,stream}.go` + their tests, `internal/service/{auth,stream}.go`, `internal/database/stream_repo.go`, and `internal/domain/{broadcaster,streamkey,stream}.go` — the v1 mediamtx auth + streams pipeline went away wholesale since 000004 dropped its tables. Added migration 000006 to drop the now-orphaned `streams.stream_key_id` column per data-model §2.1. v2 device + room + auth replacements land in subsequent commits.)_
 - [ ] T110 [P] Add 410 redirect handlers at the old paths returning `retired-endpoint` problem details pointing to the replacements.
 - [ ] T111 [P] Remove the v1 `EnvKeyStore` + shared `API_SECRET` code; ensure no code path still reads `API_SECRET`.
 - [ ] T112 [P] Register OpenTelemetry metrics from research §11 (SSE connections, event delivery latency, session validations/invalidations, ACL preview duration, room version conflicts, device auth duration).

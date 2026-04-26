@@ -348,27 +348,6 @@ func TestAuditLogHandler_ListAuditLogs_FilterByDateRange(t *testing.T) {
 	assert.Len(t, resp.AuditLogs, 1)
 }
 
-func TestAuditLogHandler_ListAuditLogs_InvalidResourceType(t *testing.T) {
-	db := testutil.SetupTestDatabase(t)
-	defer db.Cleanup(t)
-
-	h := setupAuditLogHandler(t, db.Pool)
-
-	// Filter with invalid resource_type
-	req := httptest.NewRequest(http.MethodGet, "/audit-logs?resource_type=invalid_type", nil)
-	req = addAPIKeyToContext(req, "admin-key")
-	recorder := httptest.NewRecorder()
-	h.ServeHTTP(recorder, req)
-
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-
-	var errResp map[string]interface{}
-	err := json.NewDecoder(recorder.Body).Decode(&errResp)
-	require.NoError(t, err)
-
-	assert.Contains(t, errResp["detail"], "invalid 'resource_type'")
-}
-
 func TestAuditLogHandler_ListAuditLogs_InvalidDateFormat(t *testing.T) {
 	db := testutil.SetupTestDatabase(t)
 	defer db.Cleanup(t)

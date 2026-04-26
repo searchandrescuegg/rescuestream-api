@@ -326,41 +326,29 @@ func getClientIP(r *http.Request) string {
 	return ip
 }
 
-// sanitizePath removes sensitive data from request paths.
+// sanitizePath returns the path unchanged. Reserved as a sanitization
+// hook for future routes that may carry sensitive data; currently a no-op
+// since the v1 /auth path that needed redacting was retired.
 func sanitizePath(path string) string {
-	// Don't log stream key values that may appear in paths
-	if strings.HasPrefix(path, "/auth") {
-		return "/auth"
-	}
 	return path
 }
 
-// extractResourceInfo parses resource type and ID from a request path.
+// extractResourceInfo parses resource type and ID from a request path of
+// the shape `/<resource>/<uuid>/...`. Returns ("", nil) when no recognizable
+// resource segment is present. The first segment is taken verbatim (no
+// whitelist) — the audit-log resource_type vocabulary is enforced at the
+// emission site, not at the path-parser level.
 func extractResourceInfo(path string) (string, *uuid.UUID) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 1 {
+	if len(parts) < 1 || parts[0] == "" {
 		return "", nil
 	}
-
 	resourceType := parts[0]
-	// Map plural to singular
-	switch resourceType {
-	case "broadcasters":
-		resourceType = "broadcaster"
-	case "streams":
-		resourceType = "stream"
-	case "stream-keys":
-		resourceType = "stream_key"
-	default:
-		return "", nil
-	}
-
 	if len(parts) >= 2 {
 		if id, err := uuid.Parse(parts[1]); err == nil {
 			return resourceType, &id
 		}
 	}
-
 	return resourceType, nil
 }
 

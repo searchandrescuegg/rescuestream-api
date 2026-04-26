@@ -34,16 +34,12 @@ func (e *HTTPError) Error() string {
 
 // Error type URIs
 const (
-	ErrorTypeNotFound         = "/errors/not-found"
-	ErrorTypeInvalidRequest   = "/errors/invalid-request"
-	ErrorTypeUnauthorized     = "/errors/unauthorized"
-	ErrorTypeForbidden        = "/errors/forbidden"
-	ErrorTypeConflict         = "/errors/conflict"
-	ErrorTypeInternalError    = "/errors/internal-error"
-	ErrorTypeInvalidStreamKey = "/errors/invalid-stream-key"
-	ErrorTypeStreamKeyInUse   = "/errors/stream-key-in-use"
-	ErrorTypeStreamKeyRevoked = "/errors/stream-key-revoked"
-	ErrorTypeStreamKeyExpired = "/errors/stream-key-expired"
+	ErrorTypeNotFound       = "/errors/not-found"
+	ErrorTypeInvalidRequest = "/errors/invalid-request"
+	ErrorTypeUnauthorized   = "/errors/unauthorized"
+	ErrorTypeForbidden      = "/errors/forbidden"
+	ErrorTypeConflict       = "/errors/conflict"
+	ErrorTypeInternalError  = "/errors/internal-error"
 
 	// 003-multi-tenant-platform problem types.
 	ErrorTypeNoOrgMembership      = "/problems/no-org-membership"
@@ -139,34 +135,6 @@ func MapDomainError(err error) *HTTPError {
 		return ErrConflict("A resource with the same identifier already exists")
 	case errors.Is(err, domain.ErrInvalidStatus):
 		return ErrInvalidRequest("Invalid status transition")
-	case errors.Is(err, domain.ErrStreamKeyInUse):
-		return &HTTPError{
-			Status: http.StatusConflict,
-			Type:   ErrorTypeStreamKeyInUse,
-			Title:  "Stream Key In Use",
-			Detail: "This stream key is already in use by an active stream",
-		}
-	case errors.Is(err, domain.ErrStreamKeyRevoked):
-		return &HTTPError{
-			Status: http.StatusUnauthorized,
-			Type:   ErrorTypeStreamKeyRevoked,
-			Title:  "Stream Key Revoked",
-			Detail: "This stream key has been revoked",
-		}
-	case errors.Is(err, domain.ErrStreamKeyExpired):
-		return &HTTPError{
-			Status: http.StatusUnauthorized,
-			Type:   ErrorTypeStreamKeyExpired,
-			Title:  "Stream Key Expired",
-			Detail: "This stream key has expired",
-		}
-	case errors.Is(err, domain.ErrInvalidStreamKey):
-		return &HTTPError{
-			Status: http.StatusUnauthorized,
-			Type:   ErrorTypeInvalidStreamKey,
-			Title:  "Invalid Stream Key",
-			Detail: "The provided stream key is invalid",
-		}
 	case errors.Is(err, domain.ErrUnauthorized):
 		return ErrUnauthorized("Unauthorized")
 	case errors.Is(err, domain.ErrAdminRequired):
