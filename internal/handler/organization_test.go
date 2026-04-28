@@ -52,8 +52,10 @@ func newOrgStack(t *testing.T) *orgStack {
 	identityRes := service.NewIdentityResolver(superRepo, memberRepo, orgRepo)
 	orgSvc := service.NewOrganizationService(orgRepo)
 
+	adminsSvc := service.NewOrgAdminsService(memberRepo, userRepo, orgRepo, sessSvc)
+
 	mw := handler.NewAuthMiddleware(sessSvc, identityRes, nil)
-	orgHandler := handler.NewOrganizationHandler(orgSvc, nil)
+	orgHandler := handler.NewOrganizationHandler(orgSvc, adminsSvc, nil)
 
 	userID, err := userRepo.Upsert(context.Background(), domain.UserUpsert{Email: "alice@example.org"})
 	require.NoError(t, err)
@@ -69,6 +71,8 @@ func newOrgStack(t *testing.T) *orgStack {
 	org.HandleFunc("/{id}", orgHandler.Get).Methods(http.MethodGet)
 	org.HandleFunc("/{id}", orgHandler.Update).Methods(http.MethodPatch)
 	org.HandleFunc("/{id}", orgHandler.Delete).Methods(http.MethodDelete)
+	org.HandleFunc("/{id}/admins", orgHandler.AddAdmin).Methods(http.MethodPost)
+	org.HandleFunc("/{id}/admins/{user_id}", orgHandler.RemoveAdmin).Methods(http.MethodDelete)
 
 	return &orgStack{td: td, router: r, mint: mint, userID: userID, superAdm: superRepo, orgRepo: orgRepo}
 }

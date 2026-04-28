@@ -136,12 +136,15 @@ func main() {
 	userRepo := database.NewUserRepo(pool)
 	superAdminService := service.NewSuperAdminService(pool, superAdminRepo, userRepo)
 	organizationService := service.NewOrganizationService(orgRepo)
+	orgAdminsService := service.NewOrgAdminsService(membershipRepo, userRepo, orgRepo, sessionService,
+		service.WithOrgAdminsLogger(logger),
+	)
 
 	// Create handlers
 	healthHandler := handler.NewHealthHandler(pool)
 	auditLogHandler := handler.NewAuditLogHandler(auditLogService, logger)
 	superAdminHandler := handler.NewSuperAdminHandler(superAdminService, logger)
-	organizationHandler := handler.NewOrganizationHandler(organizationService, logger)
+	organizationHandler := handler.NewOrganizationHandler(organizationService, orgAdminsService, logger)
 
 	// AuthMiddleware authenticates every protected request against the
 	// server-side session store (research §3) and resolves the caller's

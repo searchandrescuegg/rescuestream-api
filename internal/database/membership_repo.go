@@ -43,3 +43,41 @@ func (r *MembershipRepo) GetByUser(ctx context.Context, userID uuid.UUID) (*doma
 	}
 	return &m, nil
 }
+
+// Replace atomically inserts or updates the user's membership row.
+// The UNIQUE(user_id) index makes this a single ON CONFLICT statement —
+// no transaction needed at this level.
+//
+// `joined_at` is reset to NOW() on every Replace (data-model §1.4
+// invariants: a re-join into a different org is a fresh membership).
+func (r *MembershipRepo) Replace(ctx context.Context, in domain.MembershipReplace) (*domain.OrganizationMembership, error) {
+	var m domain.OrganizationMembership
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO organization_memberships (id, user_id, organization_id, team_id, role)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (user_id) DO UPDATE SET
+			organization_id = EXCLUDED.organization_id,
+			team_id         = EXCLUDED.team_id,
+			role            = EXCLUDED.role,
+			joined_at       = NOW()
+		RETURNING id, user_id, organization_id, team_id, role, joined_at
+	`, uuid.New(), in.UserID, in.OrganizationID, in.TeamID, in.Role).Scan(
+		&m.ID, &m.UserID, &m.OrganizationID, &m.TeamID, &m.Role, &m.JoinedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("membership: replace: %w", err)
+	}
+	return &m, nil
+}
+
+// DeleteByUser removes the user's membership row.
+func (r *MembershipRepo) DeleteByUser(ctx context.Context, userID uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM organization_memberships WHERE user_id = $1`, userID)
+	if err != nil {
+		return fmt.Errorf("membership: delete_by_user: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}

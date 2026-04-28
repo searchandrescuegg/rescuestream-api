@@ -156,6 +156,11 @@ func (s *Server) setupRoutes() {
 			org.HandleFunc("/{id}", s.organizationHandler.Get).Methods(http.MethodGet)
 			org.HandleFunc("/{id}", s.organizationHandler.Update).Methods(http.MethodPatch)
 			org.HandleFunc("/{id}", s.organizationHandler.Delete).Methods(http.MethodDelete)
+
+			if s.organizationHandler.HasAdminsService() {
+				org.HandleFunc("/{id}/admins", s.organizationHandler.AddAdmin).Methods(http.MethodPost)
+				org.HandleFunc("/{id}/admins/{user_id}", s.organizationHandler.RemoveAdmin).Methods(http.MethodDelete)
+			}
 		}
 	}
 }

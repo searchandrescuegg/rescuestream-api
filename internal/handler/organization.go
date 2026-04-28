@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -14,30 +15,42 @@ import (
 	"github.com/searchandrescuegg/rescuestream-api/internal/service"
 )
 
-// OrganizationHandler exposes the /orgs CRUD surface (api-routes.md §2).
+// OrganizationHandler exposes the /orgs CRUD surface (api-routes.md §2)
+// plus the /orgs/{id}/admins org-admin assignment routes (api-routes.md
+// §2 admins block, FR-004).
 //
 // Authorization composition:
-//   - POST   /orgs            — super-admin only (route wrapped with RequireSuperAdmin).
-//   - GET    /orgs            — super-admin only.
-//   - GET    /orgs/{id}       — super-admin OR org-admin of the target org.
-//   - PATCH  /orgs/{id}       — super-admin (any field) OR org-admin (name only).
-//   - DELETE /orgs/{id}       — super-admin only.
+//   - POST   /orgs                       — super-admin only.
+//   - GET    /orgs                       — super-admin only.
+//   - GET    /orgs/{id}                  — super-admin OR org-admin of the target org.
+//   - PATCH  /orgs/{id}                  — super-admin (any field) OR org-admin (name only).
+//   - DELETE /orgs/{id}                  — super-admin only.
+//   - POST   /orgs/{id}/admins           — super-admin only.
+//   - DELETE /orgs/{id}/admins/{user_id} — super-admin only.
 //
 // Per-route fine-grained authz that mixes "super-admin" and "org-admin
 // of THIS org" can't be expressed by a single subrouter middleware, so
 // each handler method calls authzForOrg below to enforce its policy.
 type OrganizationHandler struct {
-	svc    *service.OrganizationService
-	logger *slog.Logger
+	svc       *service.OrganizationService
+	adminsSvc *service.OrgAdminsService
+	logger    *slog.Logger
 }
 
-// NewOrganizationHandler constructs the handler.
-func NewOrganizationHandler(svc *service.OrganizationService, logger *slog.Logger) *OrganizationHandler {
+// NewOrganizationHandler constructs the handler. `adminsSvc` may be nil
+// during the brief window when only the org CRUD routes are wired; nil
+// disables the /orgs/{id}/admins routes' handlers (the server simply
+// won't register them).
+func NewOrganizationHandler(svc *service.OrganizationService, adminsSvc *service.OrgAdminsService, logger *slog.Logger) *OrganizationHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &OrganizationHandler{svc: svc, logger: logger}
+	return &OrganizationHandler{svc: svc, adminsSvc: adminsSvc, logger: logger}
 }
+
+// HasAdminsService reports whether the /orgs/{id}/admins routes should
+// be registered. Used by the server's setupRoutes.
+func (h *OrganizationHandler) HasAdminsService() bool { return h.adminsSvc != nil }
 
 // authzForOrg returns true when the caller is allowed to access the
 // given target org under the policy described. `orgAdminOK` is true when
@@ -240,6 +253,91 @@ func (h *OrganizationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Error("organization delete", slog.String("error", err.Error()))
 		WriteError(w, r, ErrInternalServer("Failed to delete organization"))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// addAdminRequest is the POST /orgs/{id}/admins request shape.
+type addAdminRequest struct {
+	Email string `json:"email"`
+}
+
+// AddAdmin handles POST /orgs/{org_id}/admins.
+//
+// Super-admin only. The target user is upserted by email so an admin
+// can be granted before the user has ever signed in. Their existing
+// membership (if any) is replaced with the new org-admin row, and
+// active sessions are revoked.
+func (h *OrganizationHandler) AddAdmin(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := parseOrgID(w, r)
+	if !ok {
+		return
+	}
+	caller := IdentityFromContext(r.Context())
+	if !authzForOrg(caller, orgID, false) {
+		WriteError(w, r, ErrForbidden("Only super-admins may add organization admins"))
+		return
+	}
+
+	var req addAdminRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, r, ErrInvalidRequest("Invalid JSON body"))
+		return
+	}
+
+	m, err := h.adminsSvc.AddAdmin(r.Context(), service.AddAdminInput{
+		OrgID: orgID,
+		Email: req.Email,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			WriteError(w, r, ErrNotFound("Organization not found"))
+			return
+		}
+		// Validation errors from the service.
+		if strings.Contains(err.Error(), "required") {
+			WriteError(w, r, ErrInvalidRequest(err.Error()))
+			return
+		}
+		h.logger.Error("org_admins add", slog.String("error", err.Error()))
+		WriteError(w, r, ErrInternalServer("Failed to add organization admin"))
+		return
+	}
+	WriteJSON(w, http.StatusCreated, m)
+}
+
+// RemoveAdmin handles DELETE /orgs/{org_id}/admins/{user_id}.
+func (h *OrganizationHandler) RemoveAdmin(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := parseOrgID(w, r)
+	if !ok {
+		return
+	}
+	caller := IdentityFromContext(r.Context())
+	if !authzForOrg(caller, orgID, false) {
+		WriteError(w, r, ErrForbidden("Only super-admins may remove organization admins"))
+		return
+	}
+
+	vars := mux.Vars(r)
+	userIDStr, ok := vars["user_id"]
+	if !ok || userIDStr == "" {
+		WriteError(w, r, ErrInvalidRequest("Missing user_id in path"))
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		WriteError(w, r, ErrInvalidRequest("Invalid user_id (must be a UUID)"))
+		return
+	}
+
+	if err := h.adminsSvc.RemoveAdmin(r.Context(), orgID, userID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			WriteError(w, r, ErrNotFound("Organization admin not found"))
+			return
+		}
+		h.logger.Error("org_admins remove", slog.String("error", err.Error()))
+		WriteError(w, r, ErrInternalServer("Failed to remove organization admin"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
