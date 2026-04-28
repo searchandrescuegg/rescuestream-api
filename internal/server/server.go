@@ -24,8 +24,9 @@ type Server struct {
 	authMiddleware *handler.AuthMiddleware
 
 	// Handler dependencies (set via options)
-	healthHandler   http.Handler
-	auditLogHandler http.Handler
+	healthHandler     http.Handler
+	auditLogHandler   http.Handler
+	superAdminHandler *handler.SuperAdminHandler
 
 	// Service dependencies for middleware
 	auditService *service.AuditLogService
@@ -56,6 +57,15 @@ func WithHealthHandler(h http.Handler) Option {
 func WithAuditLogHandler(h http.Handler) Option {
 	return func(s *Server) {
 		s.auditLogHandler = h
+	}
+}
+
+// WithSuperAdminHandler sets the super-admin handler. Routes registered
+// for super-admin endpoints are wrapped in RequireSuperAdmin so callers
+// without the role get a 403 forbidden upstream of the handler.
+func WithSuperAdminHandler(h *handler.SuperAdminHandler) Option {
+	return func(s *Server) {
+		s.superAdminHandler = h
 	}
 }
 
@@ -113,6 +123,16 @@ func (s *Server) setupRoutes() {
 		if s.auditLogHandler != nil {
 			protected.Handle("/audit-logs", s.auditLogHandler).Methods(http.MethodGet)
 			protected.Handle("/audit-events", s.auditLogHandler).Methods(http.MethodPost)
+		}
+
+		if s.superAdminHandler != nil {
+			// Super-admin endpoints are gated by RequireSuperAdmin in
+			// addition to AuthMiddleware (api-routes.md §3, FR-005).
+			sa := protected.PathPrefix("/super-admins").Subrouter()
+			sa.Use(handler.RequireSuperAdmin)
+			sa.HandleFunc("", s.superAdminHandler.List).Methods(http.MethodGet)
+			sa.HandleFunc("", s.superAdminHandler.Add).Methods(http.MethodPost)
+			sa.HandleFunc("/{user_id}", s.superAdminHandler.Remove).Methods(http.MethodDelete)
 		}
 	}
 }

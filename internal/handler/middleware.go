@@ -40,6 +40,25 @@ func IdentityFromContext(ctx context.Context) *domain.CallerIdentity {
 	return nil
 }
 
+// RequireSuperAdmin wraps a handler so that only super-admin callers
+// reach it. Non-super-admin callers receive a /problems/forbidden 403
+// (no-org-membership / not-in-org are surfaced by AuthMiddleware
+// upstream; this guard handles the "valid org-admin or member trying to
+// reach a super-admin-only route" case).
+//
+// Composes after AuthMiddleware: the caller MUST be authenticated for
+// IdentityFromContext to be populated.
+func RequireSuperAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ident := IdentityFromContext(r.Context())
+		if ident == nil || !ident.IsSuperAdmin() {
+			WriteError(w, r, ErrForbidden("This endpoint requires super-admin privileges"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // SessionIDFromContext returns the authenticated session id (uuid.Nil
 // if no auth ran on this request).
 func SessionIDFromContext(ctx context.Context) uuid.UUID {

@@ -133,10 +133,13 @@ func main() {
 		service.WithSlidingExpiry(time.Duration(c.SessionExpiryDays)*24*time.Hour),
 	)
 	identityResolver := service.NewIdentityResolver(superAdminRepo, membershipRepo, orgRepo)
+	userRepo := database.NewUserRepo(pool)
+	superAdminService := service.NewSuperAdminService(pool, superAdminRepo, userRepo)
 
 	// Create handlers
 	healthHandler := handler.NewHealthHandler(pool)
 	auditLogHandler := handler.NewAuditLogHandler(auditLogService, logger)
+	superAdminHandler := handler.NewSuperAdminHandler(superAdminService, logger)
 
 	// AuthMiddleware authenticates every protected request against the
 	// server-side session store (research §3) and resolves the caller's
@@ -151,6 +154,7 @@ func main() {
 		server.WithAuthMiddleware(authMiddleware),
 		server.WithHealthHandler(healthHandler),
 		server.WithAuditLogHandler(auditLogHandler),
+		server.WithSuperAdminHandler(superAdminHandler),
 		server.WithAuditService(auditLogService),
 	)
 
