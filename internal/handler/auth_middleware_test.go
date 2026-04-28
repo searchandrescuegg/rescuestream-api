@@ -52,7 +52,7 @@ func newAuthStack(t *testing.T) (*authStack, *testutil.TestDatabase) {
 	require.NoError(t, err)
 
 	return &authStack{
-		mw:     handler.NewAuthMiddleware(svc, nil),
+		mw:     handler.NewAuthMiddleware(svc, nil, nil),
 		mint:   mint,
 		userID: userID,
 		repo:   sessRepo,

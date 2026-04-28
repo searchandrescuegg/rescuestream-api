@@ -26,7 +26,19 @@ const (
 	auditStateKey contextKey = "audit_state"
 	sessionIDKey  contextKey = "session_id"
 	userIDKey     contextKey = "user_id"
+	identityKey   contextKey = "caller_identity"
 )
+
+// IdentityFromContext returns the resolved CallerIdentity for the
+// authenticated request, or nil if no auth ran. Handlers gate by
+// identity.IsSuperAdmin() and by identity.OrgID matching the target
+// resource's org.
+func IdentityFromContext(ctx context.Context) *domain.CallerIdentity {
+	if id, ok := ctx.Value(identityKey).(*domain.CallerIdentity); ok {
+		return id
+	}
+	return nil
+}
 
 // SessionIDFromContext returns the authenticated session id (uuid.Nil
 // if no auth ran on this request).
@@ -147,18 +159,27 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 }
 
 // AuthMiddleware authenticates v2 HMAC-signed requests against the
-// server-side session store. Replaces the v1 shared API_SECRET path.
+// server-side session store and resolves the caller's tenancy identity
+// (super-admin / org-admin / member; org_id; team_id; org status).
+//
+// Replaces the v1 shared API_SECRET path.
 type AuthMiddleware struct {
 	sessions *service.SessionService
+	identity *service.IdentityResolver
 	logger   *slog.Logger
 }
 
 // NewAuthMiddleware constructs a session-backed authentication middleware.
-func NewAuthMiddleware(sessions *service.SessionService, logger *slog.Logger) *AuthMiddleware {
+// The identity resolver may be nil during the brief Phase-2-only window
+// before the super_admin + membership repos land — when nil, the
+// middleware skips identity resolution and only attaches user_id +
+// session_id to the request context. Production wiring always passes a
+// non-nil resolver.
+func NewAuthMiddleware(sessions *service.SessionService, identity *service.IdentityResolver, logger *slog.Logger) *AuthMiddleware {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AuthMiddleware{sessions: sessions, logger: logger}
+	return &AuthMiddleware{sessions: sessions, identity: identity, logger: logger}
 }
 
 // Authenticate validates X-API-Key + X-Signature + X-Timestamp on every
@@ -230,13 +251,6 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 			return
 		}
 
-		m.logger.Debug("request authenticated",
-			slog.String("session_id", row.ID.String()),
-			slog.String("user_id", row.UserID.String()),
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-		)
-
 		ctx := context.WithValue(r.Context(), sessionIDKey, row.ID)
 		ctx = context.WithValue(ctx, userIDKey, row.UserID)
 		// apiKeyKey is preserved as the X-API-Key value so the existing
@@ -244,6 +258,49 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 		// session uniquely. The v2 audit log vocabulary rewrite (T032)
 		// will switch the actor source to the user_id.
 		ctx = context.WithValue(ctx, apiKeyKey, apiKey)
+
+		// Resolve the caller's tenancy identity (T030/T031). When the
+		// resolver is wired (production), this gates no-org users with
+		// /problems/no-org-membership and suspended-org users with
+		// /problems/org-suspended.
+		if m.identity != nil {
+			ident, idErr := m.identity.Resolve(r.Context(), row.UserID)
+			if idErr != nil {
+				switch {
+				case errors.Is(idErr, domain.ErrNoOrgMembership):
+					m.logger.Warn("authenticated user has no organization membership",
+						slog.String("user_id", row.UserID.String()),
+					)
+					WriteError(w, r, MapDomainError(domain.ErrNoOrgMembership))
+				default:
+					m.logger.Error("identity resolution failed",
+						slog.String("error", idErr.Error()),
+						slog.String("user_id", row.UserID.String()),
+					)
+					WriteError(w, r, ErrInternalServer("identity resolution failed"))
+				}
+				return
+			}
+
+			// Suspended-org gate (FR-030): super-admins bypass; everyone
+			// else is denied access to a suspended organization's resources.
+			if !ident.IsSuperAdmin() && ident.OrgStatus == domain.OrgStatusSuspended {
+				m.logger.Warn("rejected request to suspended organization",
+					slog.String("user_id", row.UserID.String()),
+					slog.String("org_id", ident.OrgID.String()),
+				)
+				WriteError(w, r, MapDomainError(domain.ErrOrgSuspended))
+				return
+			}
+			ctx = context.WithValue(ctx, identityKey, ident)
+		}
+
+		m.logger.Debug("request authenticated",
+			slog.String("session_id", row.ID.String()),
+			slog.String("user_id", row.UserID.String()),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+		)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

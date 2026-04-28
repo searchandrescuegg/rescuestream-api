@@ -114,6 +114,9 @@ func main() {
 	// + session work in subsequent commits).
 	auditLogRepo := database.NewAuditLogRepo(pool)
 	sessionRepo := database.NewSessionRepo(pool)
+	superAdminRepo := database.NewSuperAdminRepo(pool)
+	membershipRepo := database.NewMembershipRepo(pool)
+	orgRepo := database.NewOrganizationRepo(pool)
 
 	// Build the peppered HMAC hasher used for session secret hashing.
 	// SESSION_SECRET_PEPPER is required at boot; the hasher itself
@@ -129,16 +132,18 @@ func main() {
 	sessionService := service.NewSessionService(sessionRepo, sessionPepper,
 		service.WithSlidingExpiry(time.Duration(c.SessionExpiryDays)*24*time.Hour),
 	)
+	identityResolver := service.NewIdentityResolver(superAdminRepo, membershipRepo, orgRepo)
 
 	// Create handlers
 	healthHandler := handler.NewHealthHandler(pool)
 	auditLogHandler := handler.NewAuditLogHandler(auditLogService, logger)
 
 	// AuthMiddleware authenticates every protected request against the
-	// server-side session store (research §3). The shared API_SECRET path
-	// from v1 is gone — sessions are minted out of the OAuth callback
-	// handler (lands with US2 sign-in flow).
-	authMiddleware := handler.NewAuthMiddleware(sessionService, logger)
+	// server-side session store (research §3) and resolves the caller's
+	// tenancy identity (super-admin / org-admin / member). The shared
+	// API_SECRET path from v1 is gone — sessions are minted out of the
+	// OAuth callback handler (lands with US2 sign-in flow).
+	authMiddleware := handler.NewAuthMiddleware(sessionService, identityResolver, logger)
 
 	// Create and start HTTP server
 	srv := server.New(c.APIPort,
