@@ -24,9 +24,10 @@ type Server struct {
 	authMiddleware *handler.AuthMiddleware
 
 	// Handler dependencies (set via options)
-	healthHandler     http.Handler
-	auditLogHandler   http.Handler
-	superAdminHandler *handler.SuperAdminHandler
+	healthHandler       http.Handler
+	auditLogHandler     http.Handler
+	superAdminHandler   *handler.SuperAdminHandler
+	organizationHandler *handler.OrganizationHandler
 
 	// Service dependencies for middleware
 	auditService *service.AuditLogService
@@ -66,6 +67,15 @@ func WithAuditLogHandler(h http.Handler) Option {
 func WithSuperAdminHandler(h *handler.SuperAdminHandler) Option {
 	return func(s *Server) {
 		s.superAdminHandler = h
+	}
+}
+
+// WithOrganizationHandler sets the /orgs handler. The handler enforces
+// per-route authorization itself (super-admin vs org-admin) because the
+// policy varies by route.
+func WithOrganizationHandler(h *handler.OrganizationHandler) Option {
+	return func(s *Server) {
+		s.organizationHandler = h
 	}
 }
 
@@ -133,6 +143,19 @@ func (s *Server) setupRoutes() {
 			sa.HandleFunc("", s.superAdminHandler.List).Methods(http.MethodGet)
 			sa.HandleFunc("", s.superAdminHandler.Add).Methods(http.MethodPost)
 			sa.HandleFunc("/{user_id}", s.superAdminHandler.Remove).Methods(http.MethodDelete)
+		}
+
+		if s.organizationHandler != nil {
+			// /orgs authorization varies per-route (super-admin vs
+			// org-admin of the target org). The handler enforces it
+			// internally; we don't put RequireSuperAdmin on the
+			// subrouter so org-admins can reach GET/PATCH on their own org.
+			org := protected.PathPrefix("/orgs").Subrouter()
+			org.HandleFunc("", s.organizationHandler.Create).Methods(http.MethodPost)
+			org.HandleFunc("", s.organizationHandler.List).Methods(http.MethodGet)
+			org.HandleFunc("/{id}", s.organizationHandler.Get).Methods(http.MethodGet)
+			org.HandleFunc("/{id}", s.organizationHandler.Update).Methods(http.MethodPatch)
+			org.HandleFunc("/{id}", s.organizationHandler.Delete).Methods(http.MethodDelete)
 		}
 	}
 }
