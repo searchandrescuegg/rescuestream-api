@@ -215,6 +215,16 @@ func (s *Server) setupRoutes() {
 				// revokes a member's sessions.
 				org.HandleFunc("/{id}/members/{user_id}/revoke-sessions",
 					s.organizationHandler.RevokeMemberSessions).Methods(http.MethodPost)
+				// Member-removal (org-admin or super-admin) — only
+				// removes member-role rows; org-admins must be demoted
+				// via /admins/{user_id}.
+				org.HandleFunc("/{id}/members/{user_id}",
+					s.organizationHandler.RemoveMember).Methods(http.MethodDelete)
+			}
+			if s.organizationHandler.HasMemberService() {
+				// Members listing + per-member view (api-routes.md §5).
+				org.HandleFunc("/{id}/members", s.organizationHandler.ListMembers).Methods(http.MethodGet)
+				org.HandleFunc("/{id}/members/{user_id}", s.organizationHandler.GetMember).Methods(http.MethodGet)
 			}
 		}
 

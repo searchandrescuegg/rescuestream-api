@@ -163,6 +163,52 @@ func (s *OrgAdminsService) RevokeMemberSessions(ctx context.Context, orgID, user
 	return n, nil
 }
 
+// RemoveMember removes a non-admin member from the target org per
+// api-routes.md §5 (DELETE /orgs/{org_id}/members/{user_id}).
+//
+// Scoped to the member role on purpose: removing an org-admin must go
+// through RemoveAdmin (super-admin authority) so a rogue org-admin
+// can't unilaterally demote their peers via the members endpoint. A
+// caller hitting this method against an org-admin's user_id gets
+// ErrNotFound — the same shape as "user isn't in this org" — to avoid
+// leaking the target's role across tenants.
+//
+// After the membership row is deleted the user's sessions are revoked
+// (best-effort) with reason "member-removed". Returns the count of
+// sessions transitioned in case the handler wants to surface it.
+func (s *OrgAdminsService) RemoveMember(ctx context.Context, orgID, userID uuid.UUID) error {
+	if orgID == uuid.Nil {
+		return fmt.Errorf("org_admins: org_id required")
+	}
+	if userID == uuid.Nil {
+		return fmt.Errorf("org_admins: user_id required")
+	}
+
+	m, err := s.members.GetByUser(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.ErrNotFound
+		}
+		return fmt.Errorf("org_admins.RemoveMember: get membership: %w", err)
+	}
+	if m.OrganizationID != orgID || m.Role != domain.MembershipRoleMember {
+		return domain.ErrNotFound
+	}
+
+	if err := s.members.DeleteByUser(ctx, userID); err != nil {
+		return fmt.Errorf("org_admins.RemoveMember: delete membership: %w", err)
+	}
+
+	if _, revokeErr := s.sessions.RevokeAllForUser(ctx, userID, domain.SessionRevokeReasonMembershipRemoved); revokeErr != nil {
+		s.logger.Warn("org_admins: session revocation failed (non-fatal)",
+			slog.String("user_id", userID.String()),
+			slog.String("org_id", orgID.String()),
+			slog.String("error", revokeErr.Error()),
+		)
+	}
+	return nil
+}
+
 // RemoveAdmin removes the user's org-admin membership in the target
 // org. Returns domain.ErrNotFound if the user isn't currently an
 // org-admin of that specific org. Active sessions are revoked

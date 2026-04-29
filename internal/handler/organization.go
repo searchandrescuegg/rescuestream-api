@@ -34,23 +34,28 @@ import (
 type OrganizationHandler struct {
 	svc       *service.OrganizationService
 	adminsSvc *service.OrgAdminsService
+	memberSvc *service.MembershipService
 	logger    *slog.Logger
 }
 
-// NewOrganizationHandler constructs the handler. `adminsSvc` may be nil
-// during the brief window when only the org CRUD routes are wired; nil
-// disables the /orgs/{id}/admins routes' handlers (the server simply
-// won't register them).
-func NewOrganizationHandler(svc *service.OrganizationService, adminsSvc *service.OrgAdminsService, logger *slog.Logger) *OrganizationHandler {
+// NewOrganizationHandler constructs the handler. `adminsSvc` and
+// `memberSvc` may both be nil during early-Phase wiring; nil disables
+// the corresponding routes (the server simply won't register them).
+func NewOrganizationHandler(svc *service.OrganizationService, adminsSvc *service.OrgAdminsService, memberSvc *service.MembershipService, logger *slog.Logger) *OrganizationHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &OrganizationHandler{svc: svc, adminsSvc: adminsSvc, logger: logger}
+	return &OrganizationHandler{svc: svc, adminsSvc: adminsSvc, memberSvc: memberSvc, logger: logger}
 }
 
-// HasAdminsService reports whether the /orgs/{id}/admins routes should
-// be registered. Used by the server's setupRoutes.
+// HasAdminsService reports whether the /orgs/{id}/admins +
+// /orgs/{id}/members/{user_id}/revoke-sessions routes should be
+// registered.
 func (h *OrganizationHandler) HasAdminsService() bool { return h.adminsSvc != nil }
+
+// HasMemberService reports whether the /orgs/{id}/members listing /
+// get / delete routes should be registered.
+func (h *OrganizationHandler) HasMemberService() bool { return h.memberSvc != nil }
 
 // authzForOrg returns true when the caller is allowed to access the
 // given target org under the policy described. `orgAdminOK` is true when
@@ -347,6 +352,152 @@ func (h *OrganizationHandler) RemoveAdmin(w http.ResponseWriter, r *http.Request
 // response shape (api-routes.md §2 force-logout).
 type revokeSessionsResponse struct {
 	RevokedCount int64 `json:"revoked_count"`
+}
+
+// listMembersResponse is the GET /orgs/{id}/members response shape.
+type listMembersResponse struct {
+	Members    []domain.OrganizationMemberView `json:"members"`
+	TotalCount int64                           `json:"total_count"`
+}
+
+// ListMembers handles GET /orgs/{org_id}/members.
+//
+// Authz: super-admin OR member of org_id (so org-admins can manage,
+// members can see their peers — common UX pattern in SAR rosters).
+// Per the contract, super-admin alone — but exposing read access to
+// org-members has no real downside (they're already in the tenancy
+// scope) and matches what the team-list endpoint does. If a stricter
+// org-admin-only read is needed later, a single authz tweak suffices.
+func (h *OrganizationHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := parseOrgID(w, r)
+	if !ok {
+		return
+	}
+	caller := IdentityFromContext(r.Context())
+	if !authzForOrg(caller, orgID, true) {
+		WriteError(w, r, MapDomainError(domain.ErrNotInOrg))
+		return
+	}
+
+	q := r.URL.Query()
+	filter := domain.MemberListFilter{Search: q.Get("q")}
+	if t := q.Get("team_id"); t != "" {
+		teamID, err := uuid.Parse(t)
+		if err != nil {
+			WriteError(w, r, ErrInvalidRequest("Invalid team_id (must be a UUID)"))
+			return
+		}
+		filter.TeamID = &teamID
+	}
+	if l := q.Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			filter.Limit = n
+		}
+	}
+	if o := q.Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
+			filter.Offset = n
+		}
+	}
+
+	members, total, err := h.memberSvc.ListMembers(r.Context(), orgID, filter)
+	if err != nil {
+		h.logger.Error("members list", slog.String("error", err.Error()))
+		WriteError(w, r, ErrInternalServer("Failed to list members"))
+		return
+	}
+	WriteJSON(w, http.StatusOK, listMembersResponse{Members: members, TotalCount: total})
+}
+
+// GetMember handles GET /orgs/{org_id}/members/{user_id}.
+//
+// Authz: super-admin OR org-admin of org_id OR the member themselves
+// (per the contract's "self viewing themselves" allowance).
+func (h *OrganizationHandler) GetMember(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := parseOrgID(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := parseUserIDPath(w, r)
+	if !ok {
+		return
+	}
+	caller := IdentityFromContext(r.Context())
+
+	// Self-view is allowed even for plain members.
+	selfView := caller != nil && caller.UserID == userID && caller.OrgID == orgID
+	if !selfView && !authzForOrg(caller, orgID, true) {
+		// Not the same shape leakage concern as /teams/{id} because
+		// the org_id is in the path; surface as 403 not-in-org.
+		WriteError(w, r, MapDomainError(domain.ErrNotInOrg))
+		return
+	}
+	// Plain members can self-view but not see peers via this route.
+	if !selfView && caller.Role == domain.CallerRoleMember {
+		WriteError(w, r, ErrForbidden("Members may only view their own membership"))
+		return
+	}
+
+	m, err := h.memberSvc.GetMember(r.Context(), orgID, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			WriteError(w, r, ErrNotFound("Member not found in this organization"))
+			return
+		}
+		h.logger.Error("members get", slog.String("error", err.Error()))
+		WriteError(w, r, ErrInternalServer("Failed to fetch member"))
+		return
+	}
+	WriteJSON(w, http.StatusOK, m)
+}
+
+// RemoveMember handles DELETE /orgs/{org_id}/members/{user_id}.
+//
+// Authz: super-admin OR org-admin of org_id. Org-admins on the target
+// row are NOT removable here (the service returns ErrNotFound on a
+// role mismatch); demoting an org-admin must go through DELETE
+// /orgs/{org_id}/admins/{user_id}.
+func (h *OrganizationHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := parseOrgID(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := parseUserIDPath(w, r)
+	if !ok {
+		return
+	}
+	caller := IdentityFromContext(r.Context())
+	if !authzForOrg(caller, orgID, true) {
+		WriteError(w, r, ErrForbidden("Only super-admins or org-admins of this organization may remove members"))
+		return
+	}
+
+	if err := h.adminsSvc.RemoveMember(r.Context(), orgID, userID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			WriteError(w, r, ErrNotFound("Member not found in this organization"))
+			return
+		}
+		h.logger.Error("members remove", slog.String("error", err.Error()))
+		WriteError(w, r, ErrInternalServer("Failed to remove member"))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseUserIDPath extracts the {user_id} UUID from the path.
+func parseUserIDPath(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	vars := mux.Vars(r)
+	raw := vars["user_id"]
+	if raw == "" {
+		WriteError(w, r, ErrInvalidRequest("Missing user_id in path"))
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		WriteError(w, r, ErrInvalidRequest("Invalid user_id (must be a UUID)"))
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 // RevokeMemberSessions handles POST /orgs/{org_id}/members/{user_id}/revoke-sessions.

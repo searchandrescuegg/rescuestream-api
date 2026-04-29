@@ -53,9 +53,10 @@ func newOrgStack(t *testing.T) *orgStack {
 	orgSvc := service.NewOrganizationService(orgRepo)
 
 	adminsSvc := service.NewOrgAdminsService(memberRepo, userRepo, orgRepo, sessSvc)
+	memberSvc := service.NewMembershipService(userRepo, database.NewTeamRepo(td.Pool), memberRepo)
 
 	mw := handler.NewAuthMiddleware(sessSvc, identityRes, nil)
-	orgHandler := handler.NewOrganizationHandler(orgSvc, adminsSvc, nil)
+	orgHandler := handler.NewOrganizationHandler(orgSvc, adminsSvc, memberSvc, nil)
 
 	userID, err := userRepo.Upsert(context.Background(), domain.UserUpsert{Email: "alice@example.org"})
 	require.NoError(t, err)
@@ -74,6 +75,9 @@ func newOrgStack(t *testing.T) *orgStack {
 	org.HandleFunc("/{id}/admins", orgHandler.AddAdmin).Methods(http.MethodPost)
 	org.HandleFunc("/{id}/admins/{user_id}", orgHandler.RemoveAdmin).Methods(http.MethodDelete)
 	org.HandleFunc("/{id}/members/{user_id}/revoke-sessions", orgHandler.RevokeMemberSessions).Methods(http.MethodPost)
+	org.HandleFunc("/{id}/members/{user_id}", orgHandler.RemoveMember).Methods(http.MethodDelete)
+	org.HandleFunc("/{id}/members", orgHandler.ListMembers).Methods(http.MethodGet)
+	org.HandleFunc("/{id}/members/{user_id}", orgHandler.GetMember).Methods(http.MethodGet)
 
 	return &orgStack{td: td, router: r, mint: mint, userID: userID, superAdm: superRepo, orgRepo: orgRepo}
 }

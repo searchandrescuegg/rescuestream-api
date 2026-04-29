@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/searchandrescuegg/rescuestream-api/internal/domain"
 )
 
@@ -133,6 +135,19 @@ func (s *MembershipService) AutoJoinFromGoogle(ctx context.Context, in AutoJoinI
 	// commit doesn't double up on T048's design.
 
 	return &AutoJoinResult{User: user, Membership: m, MembershipChanged: true}, nil
+}
+
+// ListMembers returns the org's members joined with users plus a total
+// count for pagination (api-routes.md §5).
+func (s *MembershipService) ListMembers(ctx context.Context, orgID uuid.UUID, filter domain.MemberListFilter) ([]domain.OrganizationMemberView, int64, error) {
+	return s.memberships.ListByOrg(ctx, orgID, filter)
+}
+
+// GetMember returns a single member view in the target org. Cross-tenant
+// queries return ErrNotFound (the repo enforces the (org_id, user_id)
+// pair scope). Self-view callers reach the same path.
+func (s *MembershipService) GetMember(ctx context.Context, orgID, userID uuid.UUID) (*domain.OrganizationMemberView, error) {
+	return s.memberships.GetMemberInOrg(ctx, orgID, userID)
 }
 
 // emailDomain returns the lowercased domain portion of an email

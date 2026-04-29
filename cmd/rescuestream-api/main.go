@@ -154,7 +154,7 @@ func main() {
 	healthHandler := handler.NewHealthHandler(pool)
 	auditLogHandler := handler.NewAuditLogHandler(auditLogService, logger)
 	superAdminHandler := handler.NewSuperAdminHandler(superAdminService, logger)
-	organizationHandler := handler.NewOrganizationHandler(organizationService, orgAdminsService, logger)
+	organizationHandler := handler.NewOrganizationHandler(organizationService, orgAdminsService, membershipService, logger)
 	teamHandler := handler.NewTeamHandler(teamService, logger)
 	sessionsHandler := handler.NewSessionsHandler(loginService, sessionService, logger)
 
