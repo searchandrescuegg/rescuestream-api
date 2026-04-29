@@ -46,6 +46,12 @@ type Config struct {
 	// Sessions
 	SessionExpiryDays int `env:"SESSION_EXPIRY_DAYS" envDefault:"30"`
 
+	// Google OAuth (for /sessions/login-complete id_token verification).
+	// GoogleOAuthAudience is the OAuth client ID issued by the Google
+	// project that signs end-user id_tokens. Empty in local dev when
+	// the login flow isn't being exercised.
+	GoogleOAuthAudience string `env:"GOOGLE_OAUTH_AUDIENCE"`
+
 	// SSE push channel
 	SSEMaxConnsPerProcess int `env:"SSE_MAX_CONNS_PER_PROCESS" envDefault:"1000"`
 

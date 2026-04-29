@@ -17,6 +17,7 @@ import (
 	"github.com/searchandrescuegg/rescuestream-api/internal/database"
 	"github.com/searchandrescuegg/rescuestream-api/internal/handler"
 	"github.com/searchandrescuegg/rescuestream-api/internal/logging"
+	"github.com/searchandrescuegg/rescuestream-api/internal/oauth"
 	"github.com/searchandrescuegg/rescuestream-api/internal/pepper"
 	"github.com/searchandrescuegg/rescuestream-api/internal/server"
 	"github.com/searchandrescuegg/rescuestream-api/internal/service"
@@ -141,6 +142,11 @@ func main() {
 		service.WithOrgAdminsLogger(logger),
 	)
 	teamService := service.NewTeamService(teamRepo, membershipRepo, sessionService)
+	membershipService := service.NewMembershipService(userRepo, teamRepo, membershipRepo)
+	googleVerifier := oauth.NewGoogleVerifier(c.GoogleOAuthAudience)
+	loginService := service.NewLoginService(googleVerifier, membershipService, identityResolver, sessionService,
+		service.WithLoginLogger(logger),
+	)
 
 	// Create handlers
 	healthHandler := handler.NewHealthHandler(pool)
@@ -148,6 +154,11 @@ func main() {
 	superAdminHandler := handler.NewSuperAdminHandler(superAdminService, logger)
 	organizationHandler := handler.NewOrganizationHandler(organizationService, orgAdminsService, logger)
 	teamHandler := handler.NewTeamHandler(teamService, logger)
+	sessionsHandler := handler.NewSessionsHandler(loginService, sessionService, logger)
+
+	// Auth-only middleware variant for /sessions/logout — no identity
+	// resolution (so no-org-membership users can still log out).
+	sessionAuthOnly := handler.NewAuthMiddleware(sessionService, nil, logger)
 
 	// AuthMiddleware authenticates every protected request against the
 	// server-side session store (research §3) and resolves the caller's
@@ -165,6 +176,8 @@ func main() {
 		server.WithSuperAdminHandler(superAdminHandler),
 		server.WithOrganizationHandler(organizationHandler),
 		server.WithTeamHandler(teamHandler),
+		server.WithSessionsHandler(sessionsHandler),
+		server.WithSessionAuthOnly(sessionAuthOnly),
 		server.WithAuditService(auditLogService),
 	)
 
