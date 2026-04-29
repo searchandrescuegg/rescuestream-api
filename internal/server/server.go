@@ -211,6 +211,10 @@ func (s *Server) setupRoutes() {
 			if s.organizationHandler.HasAdminsService() {
 				org.HandleFunc("/{id}/admins", s.organizationHandler.AddAdmin).Methods(http.MethodPost)
 				org.HandleFunc("/{id}/admins/{user_id}", s.organizationHandler.RemoveAdmin).Methods(http.MethodDelete)
+				// FR-030b force-logout: org-admin OR super-admin bulk-
+				// revokes a member's sessions.
+				org.HandleFunc("/{id}/members/{user_id}/revoke-sessions",
+					s.organizationHandler.RevokeMemberSessions).Methods(http.MethodPost)
 			}
 		}
 

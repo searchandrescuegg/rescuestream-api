@@ -119,6 +119,50 @@ func (s *OrgAdminsService) AddAdmin(ctx context.Context, in AddAdminInput) (*dom
 	return m, nil
 }
 
+// RevokeMemberSessions implements FR-030b force-logout: an org-admin
+// (or super-admin) bulk-revokes every active session for a user who
+// is currently a member of orgID. The membership row is preserved —
+// only sessions are invalidated. Returns the count of sessions
+// transitioned (0 if the user already had no active sessions).
+//
+// Returns domain.ErrNotFound if the target user isn't currently
+// holding a membership in orgID. This avoids leaking the user's
+// actual org affiliation across tenants: an org-admin probing
+// "/orgs/<theirs>/members/<random-uuid>/revoke-sessions" gets the
+// same 404 whether the user doesn't exist OR exists in a different
+// org.
+//
+// Super-admins are not subject to the org-membership check at this
+// service-level helper; the handler enforces caller authorization
+// before invoking. (Super-admins still need the user to be in *some*
+// org for this route to make URL sense; "force-revoke any user
+// platform-wide" is a future endpoint.)
+func (s *OrgAdminsService) RevokeMemberSessions(ctx context.Context, orgID, userID uuid.UUID) (int64, error) {
+	if orgID == uuid.Nil {
+		return 0, fmt.Errorf("org_admins: org_id required")
+	}
+	if userID == uuid.Nil {
+		return 0, fmt.Errorf("org_admins: user_id required")
+	}
+
+	m, err := s.members.GetByUser(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return 0, domain.ErrNotFound
+		}
+		return 0, fmt.Errorf("org_admins.RevokeMemberSessions: get membership: %w", err)
+	}
+	if m.OrganizationID != orgID {
+		return 0, domain.ErrNotFound
+	}
+
+	n, err := s.sessions.RevokeAllForUser(ctx, userID, domain.SessionRevokeReasonAdminForceLogout)
+	if err != nil {
+		return 0, fmt.Errorf("org_admins.RevokeMemberSessions: revoke: %w", err)
+	}
+	return n, nil
+}
+
 // RemoveAdmin removes the user's org-admin membership in the target
 // org. Returns domain.ErrNotFound if the user isn't currently an
 // org-admin of that specific org. Active sessions are revoked

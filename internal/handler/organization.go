@@ -343,6 +343,58 @@ func (h *OrganizationHandler) RemoveAdmin(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// revokeSessionsResponse is the POST /orgs/{id}/members/{user_id}/revoke-sessions
+// response shape (api-routes.md §2 force-logout).
+type revokeSessionsResponse struct {
+	RevokedCount int64 `json:"revoked_count"`
+}
+
+// RevokeMemberSessions handles POST /orgs/{org_id}/members/{user_id}/revoke-sessions.
+//
+// Super-admin or org-admin of the target org. The target user MUST be
+// a current member of the target org — outsiders surface as 404 to
+// avoid leaking org affiliation across tenants. Returns 202 with the
+// revoked count.
+func (h *OrganizationHandler) RevokeMemberSessions(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := parseOrgID(w, r)
+	if !ok {
+		return
+	}
+	caller := IdentityFromContext(r.Context())
+	if !authzForOrg(caller, orgID, true) {
+		WriteError(w, r, ErrForbidden("Only super-admins or org-admins of this organization may force-logout members"))
+		return
+	}
+
+	vars := mux.Vars(r)
+	userIDStr, ok := vars["user_id"]
+	if !ok || userIDStr == "" {
+		WriteError(w, r, ErrInvalidRequest("Missing user_id in path"))
+		return
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		WriteError(w, r, ErrInvalidRequest("Invalid user_id (must be a UUID)"))
+		return
+	}
+
+	n, err := h.adminsSvc.RevokeMemberSessions(r.Context(), orgID, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			WriteError(w, r, ErrNotFound("Member not found in this organization"))
+			return
+		}
+		h.logger.Error("revoke member sessions",
+			slog.String("error", err.Error()),
+			slog.String("org_id", orgID.String()),
+			slog.String("user_id", userID.String()),
+		)
+		WriteError(w, r, ErrInternalServer("Failed to revoke member sessions"))
+		return
+	}
+	WriteJSON(w, http.StatusAccepted, revokeSessionsResponse{RevokedCount: n})
+}
+
 // parseOrgID extracts the UUID at {id} or {org_id}; returns (uuid.Nil,
 // false) and writes a 400 on bad input.
 func parseOrgID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {

@@ -73,6 +73,7 @@ func newOrgStack(t *testing.T) *orgStack {
 	org.HandleFunc("/{id}", orgHandler.Delete).Methods(http.MethodDelete)
 	org.HandleFunc("/{id}/admins", orgHandler.AddAdmin).Methods(http.MethodPost)
 	org.HandleFunc("/{id}/admins/{user_id}", orgHandler.RemoveAdmin).Methods(http.MethodDelete)
+	org.HandleFunc("/{id}/members/{user_id}/revoke-sessions", orgHandler.RevokeMemberSessions).Methods(http.MethodPost)
 
 	return &orgStack{td: td, router: r, mint: mint, userID: userID, superAdm: superRepo, orgRepo: orgRepo}
 }
