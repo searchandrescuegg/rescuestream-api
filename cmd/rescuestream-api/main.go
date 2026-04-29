@@ -141,7 +141,9 @@ func main() {
 	orgAdminsService := service.NewOrgAdminsService(membershipRepo, userRepo, orgRepo, sessionService,
 		service.WithOrgAdminsLogger(logger),
 	)
-	teamService := service.NewTeamService(teamRepo, membershipRepo, sessionService)
+	teamService := service.NewTeamService(pool, teamRepo, membershipRepo, sessionService,
+		service.WithTeamLogger(logger),
+	)
 	membershipService := service.NewMembershipService(userRepo, teamRepo, membershipRepo)
 	googleVerifier := oauth.NewGoogleVerifier(c.GoogleOAuthAudience)
 	loginService := service.NewLoginService(googleVerifier, membershipService, identityResolver, sessionService,

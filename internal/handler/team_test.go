@@ -53,7 +53,7 @@ func newTeamStack(t *testing.T) *teamStack {
 
 	sessSvc := service.NewSessionService(sessRepo, hasher)
 	identityRes := service.NewIdentityResolver(superRepo, memberRepo, orgRepo)
-	teamSvc := service.NewTeamService(teamRepo, memberRepo, sessSvc)
+	teamSvc := service.NewTeamService(td.Pool, teamRepo, memberRepo, sessSvc)
 
 	mw := handler.NewAuthMiddleware(sessSvc, identityRes, nil)
 	teamHandler := handler.NewTeamHandler(teamSvc, nil)
