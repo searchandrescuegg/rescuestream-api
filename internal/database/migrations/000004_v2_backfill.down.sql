@@ -1,0 +1,13 @@
+-- Intentional no-op.
+--
+-- The 000004_v2_backfill.up.sql migration is one-way by design (spec FR-034:
+-- v1 broadcaster + stream_key records are dropped at cutover and not
+-- reconstructable). Reverting this migration would silently produce an empty
+-- broadcasters/stream_keys schema-shaped husk that does not represent the
+-- pre-cutover state and would mislead any operator running `migrate down`.
+--
+-- The fail-forward policy for v1→v2 cutover migrations is documented in
+-- specs/003-multi-tenant-platform/tasks.md (T115a runbook). Operators who
+-- need to roll back must restore from a Neon point-in-time backup taken
+-- before `just migrate-prod` was invoked.
+SELECT 1;

@@ -26,12 +26,14 @@ services:
       DATABASE_URL: >-
         postgres://postgres:postgres@postgres:5432/rescuestream?sslmode=disable
 
-      # API Authentication - uses HMAC-SHA256 signature authentication.
-      # Clients must send X-API-Key, X-Timestamp, and X-Signature headers.
-      # Signature: HMAC-SHA256("{METHOD}\n{PATH}\n{TIMESTAMP}\n{BODY}", secret)
-      # Generate a secure secret: openssl rand -hex 32
+      # API Authentication - HMAC-SHA256 signed against per-user server-side
+      # sessions (003-multi-tenant-platform). Clients send X-API-Key,
+      # X-Timestamp, and X-Signature headers. Sessions are minted via the
+      # OAuth callback handler (US2 sign-in flow) and persisted in the
+      # `sessions` table.
       API_PORT: "8080"
-      API_SECRET: "dev-secret-change-in-production"  # CHANGE IN PROD!
+      # SESSION_SECRET_PEPPER is required: openssl rand -base64 32
+      SESSION_SECRET_PEPPER: "dev-pepper-change-in-prod-eeeeeeeeeeeeeeeeeeeeee"
 
       # MediaMTX
       MEDIAMTX_API_URL: "http://mediamtx:9997"

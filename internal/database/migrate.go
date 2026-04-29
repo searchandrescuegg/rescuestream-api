@@ -57,6 +57,30 @@ func RollbackMigrations(databaseURL string) error {
 	return nil
 }
 
+// MigrateTo migrates the database forward (or backward) to the specified
+// version. Useful for tests that need to seed v1-shaped data before applying
+// later migrations. A target of 0 rolls everything back.
+func MigrateTo(databaseURL string, target uint) error {
+	source, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create migration source: %w", err)
+	}
+
+	m, err := migrate.NewWithSourceInstance("iofs", source, databaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to create migrate instance: %w", err)
+	}
+	defer func() {
+		_, _ = m.Close()
+	}()
+
+	if err := m.Migrate(target); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("failed to migrate to version %d: %w", target, err)
+	}
+
+	return nil
+}
+
 // MigrationVersion returns the current migration version.
 func MigrationVersion(databaseURL string) (uint, bool, error) {
 	source, err := iofs.New(migrationsFS, "migrations")

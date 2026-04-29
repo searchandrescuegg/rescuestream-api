@@ -17,6 +17,7 @@ import (
 	"github.com/searchandrescuegg/rescuestream-api/internal/database"
 	"github.com/searchandrescuegg/rescuestream-api/internal/handler"
 	"github.com/searchandrescuegg/rescuestream-api/internal/logging"
+	"github.com/searchandrescuegg/rescuestream-api/internal/pepper"
 	"github.com/searchandrescuegg/rescuestream-api/internal/server"
 	"github.com/searchandrescuegg/rescuestream-api/internal/service"
 )
@@ -92,13 +93,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run database migrations
-	slog.Info("running database migrations")
-	if migrationErr := database.RunMigrations(c.DatabaseURL); migrationErr != nil {
-		slog.Error("failed to run migrations", slog.String("error", migrationErr.Error()))
-		os.Exit(1)
-	}
-	slog.Info("database migrations completed")
+	// Migrations are operator-initiated via `just migrate-prod` (or
+	// `just migrate-local` in dev) — see the 2026-04-21 spec clarification
+	// (Q3) and the runbook in tasks.md T115a. The API container MUST NOT
+	// run migrations on boot, so a failed migration cannot crash-loop the
+	// service.
 
 	// Create database connection pool
 	pool, err := database.NewPool(ctx, c.DatabaseURL,
@@ -110,54 +109,58 @@ func main() {
 	}
 	defer pool.Close()
 
-	// Create repositories
-	broadcasterRepo := database.NewBroadcasterRepo(pool)
-	streamKeyRepo := database.NewStreamKeyRepo(pool)
-	streamRepo := database.NewStreamRepo(pool)
+	// Create repositories (v1 broadcaster/streamkey/stream repos retired
+	// at the v2 cutover; their v2 replacements land with the device + room
+	// + session work in subsequent commits).
 	auditLogRepo := database.NewAuditLogRepo(pool)
+	sessionRepo := database.NewSessionRepo(pool)
+	superAdminRepo := database.NewSuperAdminRepo(pool)
+	membershipRepo := database.NewMembershipRepo(pool)
+	orgRepo := database.NewOrganizationRepo(pool)
 
-	// Create MediaMTX client
-	mediaMTXClient, err := service.NewMediaMTXClient(
-		c.MediaMTXAPIURL,
-		c.MediaMTXPublicURL,
-		service.WithMediaMTXLogger(logger),
-	)
+	// Build the peppered HMAC hasher used for session secret hashing.
+	// SESSION_SECRET_PEPPER is required at boot; the hasher itself
+	// validates the minimum length.
+	sessionPepper, err := pepper.New(c.SessionSecretPepper)
 	if err != nil {
-		slog.Error("failed to create MediaMTX client", slog.String("error", err.Error()))
+		slog.Error("invalid SESSION_SECRET_PEPPER", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 
 	// Create services
-	authService := service.NewAuthService(pool, streamKeyRepo, streamRepo, service.WithAuthLogger(logger))
-	streamService := service.NewStreamService(streamRepo, mediaMTXClient, service.WithStreamLogger(logger))
-	streamKeyService := service.NewStreamKeyService(streamKeyRepo, streamRepo, mediaMTXClient, service.WithStreamKeyLogger(logger))
-	broadcasterService := service.NewBroadcasterService(broadcasterRepo, service.WithBroadcasterLogger(logger))
 	auditLogService := service.NewAuditLogService(auditLogRepo, service.WithAuditLogLogger(logger))
+	sessionService := service.NewSessionService(sessionRepo, sessionPepper,
+		service.WithSlidingExpiry(time.Duration(c.SessionExpiryDays)*24*time.Hour),
+	)
+	identityResolver := service.NewIdentityResolver(superAdminRepo, membershipRepo, orgRepo)
+	userRepo := database.NewUserRepo(pool)
+	superAdminService := service.NewSuperAdminService(pool, superAdminRepo, userRepo)
+	organizationService := service.NewOrganizationService(orgRepo)
+	orgAdminsService := service.NewOrgAdminsService(membershipRepo, userRepo, orgRepo, sessionService,
+		service.WithOrgAdminsLogger(logger),
+	)
 
 	// Create handlers
-	authHandler := handler.NewAuthHandler(authService, logger)
-	webhookHandler := handler.NewWebhookHandler(streamRepo, streamKeyRepo, logger)
-	streamHandler := handler.NewStreamHandler(streamService, logger)
-	streamKeyHandler := handler.NewStreamKeyHandler(streamKeyService, logger)
-	broadcasterHandler := handler.NewBroadcasterHandler(broadcasterService, logger)
 	healthHandler := handler.NewHealthHandler(pool)
 	auditLogHandler := handler.NewAuditLogHandler(auditLogService, logger)
+	superAdminHandler := handler.NewSuperAdminHandler(superAdminService, logger)
+	organizationHandler := handler.NewOrganizationHandler(organizationService, orgAdminsService, logger)
 
-	// Create key store for HMAC auth
-	keyStore := handler.NewEnvKeyStore(c.APISecret)
-	authMiddleware := handler.NewAuthMiddleware(keyStore, logger)
+	// AuthMiddleware authenticates every protected request against the
+	// server-side session store (research §3) and resolves the caller's
+	// tenancy identity (super-admin / org-admin / member). The shared
+	// API_SECRET path from v1 is gone — sessions are minted out of the
+	// OAuth callback handler (lands with US2 sign-in flow).
+	authMiddleware := handler.NewAuthMiddleware(sessionService, identityResolver, logger)
 
 	// Create and start HTTP server
 	srv := server.New(c.APIPort,
 		server.WithLogger(logger),
 		server.WithAuthMiddleware(authMiddleware),
-		server.WithAuthHandler(authHandler),
-		server.WithWebhookHandler(webhookHandler),
-		server.WithStreamHandler(streamHandler),
-		server.WithStreamKeyHandler(streamKeyHandler),
-		server.WithBroadcasterHandler(broadcasterHandler),
 		server.WithHealthHandler(healthHandler),
 		server.WithAuditLogHandler(auditLogHandler),
+		server.WithSuperAdminHandler(superAdminHandler),
+		server.WithOrganizationHandler(organizationHandler),
 		server.WithAuditService(auditLogService),
 	)
 

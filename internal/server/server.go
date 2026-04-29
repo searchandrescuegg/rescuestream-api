@@ -24,13 +24,10 @@ type Server struct {
 	authMiddleware *handler.AuthMiddleware
 
 	// Handler dependencies (set via options)
-	authHandler        http.Handler
-	webhookHandler     http.Handler
-	streamHandler      http.Handler
-	streamKeyHandler   http.Handler
-	broadcasterHandler http.Handler
-	healthHandler      http.Handler
-	auditLogHandler    http.Handler
+	healthHandler       http.Handler
+	auditLogHandler     http.Handler
+	superAdminHandler   *handler.SuperAdminHandler
+	organizationHandler *handler.OrganizationHandler
 
 	// Service dependencies for middleware
 	auditService *service.AuditLogService
@@ -50,41 +47,6 @@ func WithAuthMiddleware(m *handler.AuthMiddleware) Option {
 	}
 }
 
-// WithAuthHandler sets the auth handler.
-func WithAuthHandler(h http.Handler) Option {
-	return func(s *Server) {
-		s.authHandler = h
-	}
-}
-
-// WithWebhookHandler sets the webhook handler.
-func WithWebhookHandler(h http.Handler) Option {
-	return func(s *Server) {
-		s.webhookHandler = h
-	}
-}
-
-// WithStreamHandler sets the stream handler.
-func WithStreamHandler(h http.Handler) Option {
-	return func(s *Server) {
-		s.streamHandler = h
-	}
-}
-
-// WithStreamKeyHandler sets the stream key handler.
-func WithStreamKeyHandler(h http.Handler) Option {
-	return func(s *Server) {
-		s.streamKeyHandler = h
-	}
-}
-
-// WithBroadcasterHandler sets the broadcaster handler.
-func WithBroadcasterHandler(h http.Handler) Option {
-	return func(s *Server) {
-		s.broadcasterHandler = h
-	}
-}
-
 // WithHealthHandler sets the health handler.
 func WithHealthHandler(h http.Handler) Option {
 	return func(s *Server) {
@@ -96,6 +58,24 @@ func WithHealthHandler(h http.Handler) Option {
 func WithAuditLogHandler(h http.Handler) Option {
 	return func(s *Server) {
 		s.auditLogHandler = h
+	}
+}
+
+// WithSuperAdminHandler sets the super-admin handler. Routes registered
+// for super-admin endpoints are wrapped in RequireSuperAdmin so callers
+// without the role get a 403 forbidden upstream of the handler.
+func WithSuperAdminHandler(h *handler.SuperAdminHandler) Option {
+	return func(s *Server) {
+		s.superAdminHandler = h
+	}
+}
+
+// WithOrganizationHandler sets the /orgs handler. The handler enforces
+// per-route authorization itself (super-admin vs org-admin) because the
+// policy varies by route.
+func WithOrganizationHandler(h *handler.OrganizationHandler) Option {
+	return func(s *Server) {
+		s.organizationHandler = h
 	}
 }
 
@@ -135,16 +115,6 @@ func (s *Server) setupRoutes() {
 	s.router.Use(handler.RequestIDMiddleware)
 	s.router.Use(handler.LoggingMiddleware(s.logger))
 
-	// Public routes (no auth required) - for MediaMTX
-	if s.authHandler != nil {
-		s.router.Handle("/auth", s.authHandler).Methods(http.MethodPost)
-	}
-
-	if s.webhookHandler != nil {
-		s.router.Handle("/webhook/ready", s.webhookHandler).Methods(http.MethodPost)
-		s.router.Handle("/webhook/not-ready", s.webhookHandler).Methods(http.MethodPost)
-	}
-
 	// Health check (no auth required)
 	if s.healthHandler != nil {
 		s.router.Handle("/health", s.healthHandler).Methods(http.MethodGet)
@@ -160,24 +130,37 @@ func (s *Server) setupRoutes() {
 			protected.Use(handler.AuditMiddleware(s.auditService, s.logger))
 		}
 
-		if s.streamHandler != nil {
-			protected.Handle("/streams", s.streamHandler).Methods(http.MethodGet)
-			protected.Handle("/streams/{id}", s.streamHandler).Methods(http.MethodGet)
-		}
-
-		if s.streamKeyHandler != nil {
-			protected.Handle("/stream-keys", s.streamKeyHandler).Methods(http.MethodGet, http.MethodPost)
-			protected.Handle("/stream-keys/{id}", s.streamKeyHandler).Methods(http.MethodGet, http.MethodDelete)
-		}
-
-		if s.broadcasterHandler != nil {
-			protected.Handle("/broadcasters", s.broadcasterHandler).Methods(http.MethodGet, http.MethodPost)
-			protected.Handle("/broadcasters/{id}", s.broadcasterHandler).Methods(http.MethodGet, http.MethodPatch, http.MethodDelete)
-		}
-
 		if s.auditLogHandler != nil {
 			protected.Handle("/audit-logs", s.auditLogHandler).Methods(http.MethodGet)
 			protected.Handle("/audit-events", s.auditLogHandler).Methods(http.MethodPost)
+		}
+
+		if s.superAdminHandler != nil {
+			// Super-admin endpoints are gated by RequireSuperAdmin in
+			// addition to AuthMiddleware (api-routes.md §3, FR-005).
+			sa := protected.PathPrefix("/super-admins").Subrouter()
+			sa.Use(handler.RequireSuperAdmin)
+			sa.HandleFunc("", s.superAdminHandler.List).Methods(http.MethodGet)
+			sa.HandleFunc("", s.superAdminHandler.Add).Methods(http.MethodPost)
+			sa.HandleFunc("/{user_id}", s.superAdminHandler.Remove).Methods(http.MethodDelete)
+		}
+
+		if s.organizationHandler != nil {
+			// /orgs authorization varies per-route (super-admin vs
+			// org-admin of the target org). The handler enforces it
+			// internally; we don't put RequireSuperAdmin on the
+			// subrouter so org-admins can reach GET/PATCH on their own org.
+			org := protected.PathPrefix("/orgs").Subrouter()
+			org.HandleFunc("", s.organizationHandler.Create).Methods(http.MethodPost)
+			org.HandleFunc("", s.organizationHandler.List).Methods(http.MethodGet)
+			org.HandleFunc("/{id}", s.organizationHandler.Get).Methods(http.MethodGet)
+			org.HandleFunc("/{id}", s.organizationHandler.Update).Methods(http.MethodPatch)
+			org.HandleFunc("/{id}", s.organizationHandler.Delete).Methods(http.MethodDelete)
+
+			if s.organizationHandler.HasAdminsService() {
+				org.HandleFunc("/{id}/admins", s.organizationHandler.AddAdmin).Methods(http.MethodPost)
+				org.HandleFunc("/{id}/admins/{user_id}", s.organizationHandler.RemoveAdmin).Methods(http.MethodDelete)
+			}
 		}
 	}
 }

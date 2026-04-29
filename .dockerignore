@@ -1,0 +1,39 @@
+.git/
+.github/
+.githooks/
+.gitignore
+.dockerignore
+
+# Build artifacts
+bin/
+*.exe
+*.test
+*.out
+coverage.out
+vendor/
+
+# Environment and secrets
+.env
+.env.*
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local tooling
+docker-compose.yml
+docker/
+scripts/
+Makefile
+justfile
+README.md
+LICENSE
+CLAUDE.md
+
+# Tests and spec artifacts
+tests/
+specs/
+docs/
+*.md

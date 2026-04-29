@@ -151,15 +151,10 @@ func (h *AuditLogHandler) parseAuditLogFilter(r *http.Request) (domain.AuditLogF
 	}
 
 	if resourceType := query.Get("resource_type"); resourceType != "" {
-		// Validate resource type
-		validTypes := map[string]bool{
-			"broadcaster": true,
-			"stream":      true,
-			"stream_key":  true,
-		}
-		if !validTypes[resourceType] {
-			return filter, fmt.Errorf("invalid 'resource_type', must be one of: broadcaster, stream, stream_key")
-		}
+		// Resource-type vocabulary is open by design: org-admins filter the
+		// audit log by whatever resource types the platform actually emits
+		// (organization, team, membership, tag, device, room, …). Emission-
+		// site code is the single source of truth for valid values.
 		filter.ResourceType = &resourceType
 	}
 

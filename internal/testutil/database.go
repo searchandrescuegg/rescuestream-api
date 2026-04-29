@@ -81,7 +81,9 @@ func (td *TestDatabase) TruncateTables(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 
-	tables := []string{"streams", "stream_keys", "broadcasters"}
+	// stream_keys and broadcasters were retired by the 003-multi-tenant-platform
+	// cutover migration (000004); only streams survives from the v1 schema.
+	tables := []string{"streams"}
 	for _, table := range tables {
 		_, err := td.Pool.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", table))
 		if err != nil {
