@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -68,6 +69,95 @@ func (r *MembershipRepo) Replace(ctx context.Context, in domain.MembershipReplac
 		return nil, fmt.Errorf("membership: replace: %w", err)
 	}
 	return &m, nil
+}
+
+// GetMemberInOrg returns the member view for a specific (org, user)
+// pair. Returns domain.ErrNotFound when no row matches.
+func (r *MembershipRepo) GetMemberInOrg(ctx context.Context, orgID, userID uuid.UUID) (*domain.OrganizationMemberView, error) {
+	var m domain.OrganizationMemberView
+	err := r.pool.QueryRow(ctx, `
+		SELECT om.user_id, u.email, u.display_name,
+		       om.organization_id, om.team_id, om.role, om.joined_at
+		FROM organization_memberships om
+		JOIN users u ON u.id = om.user_id
+		WHERE om.organization_id = $1 AND om.user_id = $2
+	`, orgID, userID).Scan(
+		&m.UserID, &m.Email, &m.DisplayName,
+		&m.OrganizationID, &m.TeamID, &m.Role, &m.JoinedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("membership: get_member_in_org: %w", err)
+	}
+	// Tags stay empty until the tag schema lands; the JSON field is
+	// always present so the wire shape doesn't shift.
+	m.TagIDs = []uuid.UUID{}
+	return &m, nil
+}
+
+// ListByOrg returns the org's members with optional team_id and
+// substring filters, plus a total row count.
+func (r *MembershipRepo) ListByOrg(ctx context.Context, orgID uuid.UUID, filter domain.MemberListFilter) ([]domain.OrganizationMemberView, int64, error) {
+	conds := []string{"om.organization_id = $1"}
+	args := []any{orgID}
+
+	if filter.TeamID != nil {
+		conds = append(conds, fmt.Sprintf("om.team_id = $%d", len(args)+1))
+		args = append(args, *filter.TeamID)
+	}
+	if filter.Search != "" {
+		args = append(args, "%"+strings.ToLower(filter.Search)+"%")
+		conds = append(conds, fmt.Sprintf("(LOWER(u.email) LIKE $%d OR LOWER(COALESCE(u.display_name, '')) LIKE $%d)", len(args), len(args)))
+	}
+	whereClause := "WHERE " + strings.Join(conds, " AND ")
+
+	var total int64
+	if err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM organization_memberships om
+		JOIN users u ON u.id = om.user_id `+whereClause,
+		args...,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("membership: list_by_org count: %w", err)
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	args = append(args, limit, filter.Offset)
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+		SELECT om.user_id, u.email, u.display_name,
+		       om.organization_id, om.team_id, om.role, om.joined_at
+		FROM organization_memberships om
+		JOIN users u ON u.id = om.user_id
+		%s
+		ORDER BY u.display_name NULLS LAST, u.email ASC
+		LIMIT $%d OFFSET $%d
+	`, whereClause, len(args)-1, len(args)), args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("membership: list_by_org: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]domain.OrganizationMemberView, 0)
+	for rows.Next() {
+		var m domain.OrganizationMemberView
+		if err := rows.Scan(
+			&m.UserID, &m.Email, &m.DisplayName,
+			&m.OrganizationID, &m.TeamID, &m.Role, &m.JoinedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("membership: list_by_org scan: %w", err)
+		}
+		m.TagIDs = []uuid.UUID{}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("membership: list_by_org iter: %w", err)
+	}
+	return out, total, nil
 }
 
 // DeleteByUser removes the user's membership row.

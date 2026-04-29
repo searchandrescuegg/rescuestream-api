@@ -24,10 +24,13 @@ type Server struct {
 	authMiddleware *handler.AuthMiddleware
 
 	// Handler dependencies (set via options)
-	healthHandler       http.Handler
-	auditLogHandler     http.Handler
-	superAdminHandler   *handler.SuperAdminHandler
-	organizationHandler *handler.OrganizationHandler
+	healthHandler        http.Handler
+	auditLogHandler      http.Handler
+	superAdminHandler    *handler.SuperAdminHandler
+	organizationHandler  *handler.OrganizationHandler
+	teamHandler          *handler.TeamHandler
+	sessionsHandler      *handler.SessionsHandler
+	sessionAuthOnlyChain *handler.AuthMiddleware // identity-resolver-less variant for /sessions/logout
 
 	// Service dependencies for middleware
 	auditService *service.AuditLogService
@@ -79,6 +82,36 @@ func WithOrganizationHandler(h *handler.OrganizationHandler) Option {
 	}
 }
 
+// WithTeamHandler sets the team handler. Team routes live under both
+// /orgs/{org_id}/teams (collection) and /teams/{team_id} (resource);
+// authorization is enforced inside each handler method.
+func WithTeamHandler(h *handler.TeamHandler) Option {
+	return func(s *Server) {
+		s.teamHandler = h
+	}
+}
+
+// WithSessionsHandler sets the /sessions handler. POST /sessions/login-
+// complete is wired as a public route; POST /sessions/logout is wired
+// behind the session-only auth middleware (sessionAuthOnlyChain) so
+// no-org-membership users can still log out — see WithSessionAuthOnly.
+func WithSessionsHandler(h *handler.SessionsHandler) Option {
+	return func(s *Server) {
+		s.sessionsHandler = h
+	}
+}
+
+// WithSessionAuthOnly sets the auth middleware variant used by routes
+// that need a valid session BUT must NOT reject no-org-membership
+// callers. Construct it with NewAuthMiddleware(sessionService, nil, logger).
+// Required when WithSessionsHandler is set so /sessions/logout can be
+// reached by any signed-in user.
+func WithSessionAuthOnly(m *handler.AuthMiddleware) Option {
+	return func(s *Server) {
+		s.sessionAuthOnlyChain = m
+	}
+}
+
 // WithAuditService sets the audit log service for middleware.
 func WithAuditService(svc *service.AuditLogService) Option {
 	return func(s *Server) {
@@ -118,6 +151,24 @@ func (s *Server) setupRoutes() {
 	// Health check (no auth required)
 	if s.healthHandler != nil {
 		s.router.Handle("/health", s.healthHandler).Methods(http.MethodGet)
+	}
+
+	// Public sign-in route (the body itself is authenticated by the
+	// Google id_token verification step inside the handler).
+	if s.sessionsHandler != nil {
+		s.router.HandleFunc("/sessions/login-complete", s.sessionsHandler.LoginComplete).
+			Methods(http.MethodPost)
+	}
+
+	// /sessions/logout requires a valid session BUT must reach
+	// no-org-membership users (otherwise they can never log out).
+	// Wire it on a session-only middleware chain that skips identity
+	// resolution.
+	if s.sessionsHandler != nil && s.sessionAuthOnlyChain != nil {
+		sessionsOnly := s.router.PathPrefix("").Subrouter()
+		sessionsOnly.Use(s.sessionAuthOnlyChain.Authenticate)
+		sessionsOnly.HandleFunc("/sessions/logout", s.sessionsHandler.Logout).
+			Methods(http.MethodPost)
 	}
 
 	// Protected routes (require auth)
@@ -160,7 +211,31 @@ func (s *Server) setupRoutes() {
 			if s.organizationHandler.HasAdminsService() {
 				org.HandleFunc("/{id}/admins", s.organizationHandler.AddAdmin).Methods(http.MethodPost)
 				org.HandleFunc("/{id}/admins/{user_id}", s.organizationHandler.RemoveAdmin).Methods(http.MethodDelete)
+				// FR-030b force-logout: org-admin OR super-admin bulk-
+				// revokes a member's sessions.
+				org.HandleFunc("/{id}/members/{user_id}/revoke-sessions",
+					s.organizationHandler.RevokeMemberSessions).Methods(http.MethodPost)
+				// Member-removal (org-admin or super-admin) — only
+				// removes member-role rows; org-admins must be demoted
+				// via /admins/{user_id}.
+				org.HandleFunc("/{id}/members/{user_id}",
+					s.organizationHandler.RemoveMember).Methods(http.MethodDelete)
 			}
+			if s.organizationHandler.HasMemberService() {
+				// Members listing + per-member view (api-routes.md §5).
+				org.HandleFunc("/{id}/members", s.organizationHandler.ListMembers).Methods(http.MethodGet)
+				org.HandleFunc("/{id}/members/{user_id}", s.organizationHandler.GetMember).Methods(http.MethodGet)
+			}
+		}
+
+		if s.teamHandler != nil {
+			// Team routes split between org-scoped collection paths and
+			// resource paths. Per-route authz lives inside the handler.
+			protected.HandleFunc("/orgs/{org_id}/teams", s.teamHandler.Create).Methods(http.MethodPost)
+			protected.HandleFunc("/orgs/{org_id}/teams", s.teamHandler.ListByOrg).Methods(http.MethodGet)
+			protected.HandleFunc("/teams/{team_id}", s.teamHandler.Get).Methods(http.MethodGet)
+			protected.HandleFunc("/teams/{team_id}", s.teamHandler.Update).Methods(http.MethodPatch)
+			protected.HandleFunc("/teams/{team_id}", s.teamHandler.Delete).Methods(http.MethodDelete)
 		}
 	}
 }
