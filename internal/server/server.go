@@ -28,6 +28,7 @@ type Server struct {
 	auditLogHandler     http.Handler
 	superAdminHandler   *handler.SuperAdminHandler
 	organizationHandler *handler.OrganizationHandler
+	teamHandler         *handler.TeamHandler
 
 	// Service dependencies for middleware
 	auditService *service.AuditLogService
@@ -76,6 +77,15 @@ func WithSuperAdminHandler(h *handler.SuperAdminHandler) Option {
 func WithOrganizationHandler(h *handler.OrganizationHandler) Option {
 	return func(s *Server) {
 		s.organizationHandler = h
+	}
+}
+
+// WithTeamHandler sets the team handler. Team routes live under both
+// /orgs/{org_id}/teams (collection) and /teams/{team_id} (resource);
+// authorization is enforced inside each handler method.
+func WithTeamHandler(h *handler.TeamHandler) Option {
+	return func(s *Server) {
+		s.teamHandler = h
 	}
 }
 
@@ -161,6 +171,16 @@ func (s *Server) setupRoutes() {
 				org.HandleFunc("/{id}/admins", s.organizationHandler.AddAdmin).Methods(http.MethodPost)
 				org.HandleFunc("/{id}/admins/{user_id}", s.organizationHandler.RemoveAdmin).Methods(http.MethodDelete)
 			}
+		}
+
+		if s.teamHandler != nil {
+			// Team routes split between org-scoped collection paths and
+			// resource paths. Per-route authz lives inside the handler.
+			protected.HandleFunc("/orgs/{org_id}/teams", s.teamHandler.Create).Methods(http.MethodPost)
+			protected.HandleFunc("/orgs/{org_id}/teams", s.teamHandler.ListByOrg).Methods(http.MethodGet)
+			protected.HandleFunc("/teams/{team_id}", s.teamHandler.Get).Methods(http.MethodGet)
+			protected.HandleFunc("/teams/{team_id}", s.teamHandler.Update).Methods(http.MethodPatch)
+			protected.HandleFunc("/teams/{team_id}", s.teamHandler.Delete).Methods(http.MethodDelete)
 		}
 	}
 }

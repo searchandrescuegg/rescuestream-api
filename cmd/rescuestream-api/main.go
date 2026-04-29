@@ -117,6 +117,7 @@ func main() {
 	superAdminRepo := database.NewSuperAdminRepo(pool)
 	membershipRepo := database.NewMembershipRepo(pool)
 	orgRepo := database.NewOrganizationRepo(pool)
+	teamRepo := database.NewTeamRepo(pool)
 
 	// Build the peppered HMAC hasher used for session secret hashing.
 	// SESSION_SECRET_PEPPER is required at boot; the hasher itself
@@ -139,12 +140,14 @@ func main() {
 	orgAdminsService := service.NewOrgAdminsService(membershipRepo, userRepo, orgRepo, sessionService,
 		service.WithOrgAdminsLogger(logger),
 	)
+	teamService := service.NewTeamService(teamRepo, membershipRepo, sessionService)
 
 	// Create handlers
 	healthHandler := handler.NewHealthHandler(pool)
 	auditLogHandler := handler.NewAuditLogHandler(auditLogService, logger)
 	superAdminHandler := handler.NewSuperAdminHandler(superAdminService, logger)
 	organizationHandler := handler.NewOrganizationHandler(organizationService, orgAdminsService, logger)
+	teamHandler := handler.NewTeamHandler(teamService, logger)
 
 	// AuthMiddleware authenticates every protected request against the
 	// server-side session store (research §3) and resolves the caller's
@@ -161,6 +164,7 @@ func main() {
 		server.WithAuditLogHandler(auditLogHandler),
 		server.WithSuperAdminHandler(superAdminHandler),
 		server.WithOrganizationHandler(organizationHandler),
+		server.WithTeamHandler(teamHandler),
 		server.WithAuditService(auditLogService),
 	)
 
